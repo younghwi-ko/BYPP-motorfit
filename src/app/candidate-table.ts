@@ -3,7 +3,7 @@ import type { CandidateResult } from "../engine";
 export type CandidateSortKey = "status" | "mass" | "pressure" | "burnTime" | "averageThrust" | "score";
 export type CandidateSortDirection = "asc" | "desc";
 
-export const SCORE_GUIDANCE = "종합 점수는 목표 질량·압력 여유·평균 추력·연소시간을 동일한 비중으로 평가한 비교용 지표입니다. 공식 대회 판정 점수가 아닙니다.";
+export const SCORE_GUIDANCE = "종합 점수는 선택한 우선순위에 따라 질량·평균 추력·압력 여유를 비교하며, 기본 구성은 동일한 비중의 비교용 지표입니다. 공식 대회 판정 점수가 아닙니다.";
 
 const valueFor = (candidate: CandidateResult, key: CandidateSortKey): number => {
   if (key === "status") return candidate.status === "pass" ? 0 : 1;

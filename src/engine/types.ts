@@ -285,6 +285,8 @@ export interface CandidateSearchConfig {
   nozzleErosionMm: number;
   manufacturingStepMm?: number;
   maxCandidateCount?: number;
+  searchPriority?: "mass" | "thrust" | "balanced";
+  burnTimeFilterEnabled?: boolean;
 }
 
 export interface CandidateScoreBreakdown {

@@ -23,4 +23,16 @@ describe("GSRM Calculator and AS568 catalog", () => {
     expect(rows.some((row) => row.partNumber === "AN-129-NBR")).toBe(true);
     expect(rows[0].calculation.check.passedCount).toBeGreaterThanOrEqual(rows.at(-1)!.calculation.check.passedCount);
   });
+
+  it("marks negative compression and invalid depth as GSRM failures", () => {
+    const result = calculateGsrmCalculator({ referenceDiameterMm: 30, innerDiameterMm: 20, crossSectionMm: 2, hardness: 70 });
+    expect(result.compressionMm).toBeLessThan(0);
+    expect(result.check.status).toBe("fail");
+    expect(result.check.reasons).toContain("압축량이 0.1 mm 미만");
+  });
+
+  it("keeps the backup-ring boundary at B=50 mm", () => {
+    expect(calculateGsrmCalculator({ referenceDiameterMm: 50, innerDiameterMm: 40, crossSectionMm: 2, hardness: 70 }).backupRingRequired).toBe(true);
+    expect(calculateGsrmCalculator({ referenceDiameterMm: 49.999, innerDiameterMm: 40, crossSectionMm: 2, hardness: 70 }).backupRingRequired).toBe(false);
+  });
 });

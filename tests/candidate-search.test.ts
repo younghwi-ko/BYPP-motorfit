@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 
 import {
   estimateCandidateCount,
+  createAutomaticCandidateSearchConfig,
   CandidateSearchInputError,
   scoreCandidate,
   searchCandidates,
@@ -117,5 +118,14 @@ describe("candidate score", () => {
     expect(score.averageThrustErrorNormalized).toBeCloseTo(0.5, 12);
     expect(score.burnTimeErrorNormalized).toBeCloseTo(0.5, 12);
     expect(score.totalScore).toBeCloseTo(43.75, 11);
+  });
+});
+
+describe("automatic candidate envelope", () => {
+  it("expands beyond the original 40-50 mm range for a 1 kg target", () => {
+    const config = createAutomaticCandidateSearchConfig({ ...BASE_CONFIG, targetFuelMassKg: 1 });
+    expect(config.outerDiameterMm.min).toBeLessThan(40);
+    expect(config.manufacturingStepMm).toBe(5);
+    expect(config.burnTimeFilterEnabled).toBe(false);
   });
 });

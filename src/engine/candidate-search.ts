@@ -86,6 +86,27 @@ export function estimateCandidateCount(config: CandidateSearchConfig): number {
   );
 }
 
+/** Build a bounded 5 mm manufacturing search envelope from target mass. */
+export function createAutomaticCandidateSearchConfig(config: CandidateSearchConfig): CandidateSearchConfig {
+  const chamberMax = Math.max(50, Math.floor((config.chamberDiameterMm - 5) / 5) * 5);
+  const maxLength = Math.max(85, Math.floor((config.chamberLengthMm - 5) / 5) * 5);
+  const targetScale = Math.max(1, Math.sqrt(Math.max(config.targetFuelMassKg, 0.01) / 0.3956));
+  const outerMin = 30;
+  const outerMax = Math.min(chamberMax, Math.max(50, Math.ceil(50 * targetScale / 5) * 5));
+  const coreMax = Math.max(20, Math.min(outerMax - 5, Math.ceil(20 * targetScale / 5) * 5));
+  const lengthMax = Math.min(maxLength, Math.max(85, Math.ceil(85 * targetScale / 5) * 5));
+  return {
+    ...config,
+    outerDiameterMm: { min: outerMin, max: outerMax, step: 5 },
+    coreDiameterMm: { min: 5, max: coreMax, step: 5 },
+    segmentLengthMm: { min: 25, max: lengthMax, step: 5 },
+    segmentCount: { min: 1, max: Math.min(8, Math.max(2, Math.ceil(targetScale * 3))) },
+    maxCandidateCount: Math.min(config.maxCandidateCount ?? DEFAULT_MAX_CANDIDATES, 2500),
+    manufacturingStepMm: 5,
+    burnTimeFilterEnabled: false,
+  };
+}
+
 function finiteMetrics(candidate: CandidateResult): boolean {
   return [
     candidate.grainMassKg,
@@ -182,10 +203,8 @@ export function searchCandidates(config: CandidateSearchConfig): CandidateSearch
             ) {
               reasons.push("평균 추력 허용 범위를 벗어났습니다.");
             }
-            if (
-              Math.abs(pressure.burnTimeSec - config.targetBurnTimeSec) >
-              config.burnTimeToleranceSec
-            ) {
+            if (config.burnTimeFilterEnabled !== false &&
+              Math.abs(pressure.burnTimeSec - config.targetBurnTimeSec) > config.burnTimeToleranceSec) {
               reasons.push("연소 시간 허용 범위를 벗어났습니다.");
             }
 

@@ -18,6 +18,7 @@ export { scoreCandidate } from "./candidate-score";
 export {
   CandidateSearchInputError,
   estimateCandidateCount,
+  createAutomaticCandidateSearchConfig,
   searchCandidates,
   validateCandidateSearchConfig,
 } from "./candidate-search";

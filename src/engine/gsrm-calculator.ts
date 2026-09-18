@@ -65,17 +65,21 @@ function sealFactor(crossSectionMm: number, hardness: GsrmHardness): number {
 }
 
 function checkResult(result: Omit<GsrmCalculatorResult, "check">): GsrmEngineeringCheck {
-  const stretch = result.stretchPercent >= GSRM_ENGINEERING_TARGETS.stretchPercent.min && result.stretchPercent <= GSRM_ENGINEERING_TARGETS.stretchPercent.max;
-  const compressionMm = result.compressionMm >= GSRM_ENGINEERING_TARGETS.compressionMm.min;
-  const compressionPercent = result.compressionPercent >= GSRM_ENGINEERING_TARGETS.compressionPercent.min && result.compressionPercent <= GSRM_ENGINEERING_TARGETS.compressionPercent.max;
-  const fill = result.grooveFillPercent >= GSRM_ENGINEERING_TARGETS.fillPercent.min && result.grooveFillPercent <= GSRM_ENGINEERING_TARGETS.fillPercent.max;
-  const passedCount = [stretch, compressionMm, compressionPercent, fill].filter(Boolean).length;
+  const finite = [result.outsideDiameterMm, result.crossSectionAreaMm2, result.grooveDiameterMm, result.grooveDepthMm, result.grooveWidthMm, result.grooveAreaMm2, result.stretchPercent, result.compressionMm, result.compressionPercent, result.grooveFillPercent, result.landDiameterMm].every(Number.isFinite);
+  const stretch = finite && result.stretchPercent >= GSRM_ENGINEERING_TARGETS.stretchPercent.min && result.stretchPercent <= GSRM_ENGINEERING_TARGETS.stretchPercent.max;
+  const compressionMm = finite && result.compressionMm >= GSRM_ENGINEERING_TARGETS.compressionMm.min;
+  const compressionPercent = finite && result.compressionPercent >= GSRM_ENGINEERING_TARGETS.compressionPercent.min && result.compressionPercent <= GSRM_ENGINEERING_TARGETS.compressionPercent.max;
+  const fill = finite && result.grooveFillPercent >= GSRM_ENGINEERING_TARGETS.fillPercent.min && result.grooveFillPercent <= GSRM_ENGINEERING_TARGETS.fillPercent.max;
+  const depth = finite && result.grooveDepthMm > 0;
+  const passedCount = [stretch, compressionMm, compressionPercent, fill, depth].filter(Boolean).length;
   const reasons: string[] = [];
+  if (!finite) reasons.push("계산값이 유효하지 않음");
   if (!stretch) reasons.push("신장률 0~5% 범위 이탈");
-  if (!compressionMm) reasons.push("압축량 0.1 mm 미만");
-  if (!compressionPercent) reasons.push("압축률 5~30% 범위 이탈");
+  if (!compressionMm) reasons.push("압축량이 0.1 mm 미만");
+  if (!compressionPercent) reasons.push("압축률이 허용 범위를 벗어남");
   if (!fill) reasons.push("홈 충전율 65~85% 범위 이탈");
-  return { stretch, compressionMm, compressionPercent, fill, backupRingRequired: result.backupRingRequired, passedCount, reasons, status: passedCount === 4 ? "recommend" : passedCount > 0 ? "conditional" : "fail" };
+  if (!depth) reasons.push("홈 깊이가 유효하지 않음");
+  return { stretch, compressionMm, compressionPercent, fill, backupRingRequired: result.backupRingRequired, passedCount, reasons, status: passedCount === 5 ? "recommend" : "fail" };
 }
 
 /** Exact Calculator formulas from GSRM_Oring.xlsx (mm and percent). */
