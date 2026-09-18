@@ -38,6 +38,6 @@ describe("candidate table sorting", () => {
   });
   it("exposes the score guidance shown above the table", () => {
     expect(SCORE_GUIDANCE).toContain("공식 대회 판정 점수가 아닙니다");
-    expect(SCORE_GUIDANCE).toContain("동일한 비중");
+    expect(SCORE_GUIDANCE).toContain("추력 곡선 오차");
   });
 });

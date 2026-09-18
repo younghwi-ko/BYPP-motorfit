@@ -23,6 +23,7 @@ export {
   validateCandidateSearchConfig,
 } from "./candidate-search";
 export { calculateNozzleDesign } from "./nozzle-design";
+export { evaluateThrustCurve } from "./thrust-evaluation";
 export {
   calculateGsrmReferenceDiameter,
   DEFAULT_GSRM_WALL_THICKNESS_MM,
@@ -78,6 +79,7 @@ export type {
   PressureSimulationOptions,
   SurfaceCondition,
   ValidationIssue,
+  ThrustCurveEvaluation,
 } from "./types";
 export type {
   GsrmCalculatorInput,

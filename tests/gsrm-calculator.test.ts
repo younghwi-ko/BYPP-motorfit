@@ -2,10 +2,20 @@ import { describe, expect, it } from "vitest";
 import { AN_SERIES_CATALOG, DEFAULT_AN_CANDIDATE, calculateGsrmCalculator, evaluateAnCatalog } from "../src/engine";
 
 describe("GSRM Calculator and AS568 catalog", () => {
-  it("reproduces the supplied AN-129 nominal dimensions", () => {
-    expect(DEFAULT_AN_CANDIDATE.partNumber).toBe("AN-129-NBR");
-    expect(DEFAULT_AN_CANDIDATE.innerDiameterMm).toBe(39.34);
+  it("uses AN-132 as the GSRM baseline while preserving AN-129 mapping", () => {
+    expect(DEFAULT_AN_CANDIDATE.partNumber).toBe("AN-132-NBR");
+    expect(DEFAULT_AN_CANDIDATE.innerDiameterMm).toBe(44.12);
     expect(DEFAULT_AN_CANDIDATE.crossSectionMm).toBe(2.62);
+    const an129 = AN_SERIES_CATALOG.find((item) => item.sizeNo === 129)!;
+    expect(an129.innerDiameterMm).toBe(39.34);
+    expect(an129.crossSectionMm).toBe(2.62);
+  });
+
+  it("matches the GSRM workbook baseline for AN-132 at B=49 mm", () => {
+    const result = calculateGsrmCalculator({ referenceDiameterMm: 49, innerDiameterMm: 44.12, crossSectionMm: 2.62, hardness: 70 });
+    expect(result.compressionPercent).toBeCloseTo(23.709923664122172, 12);
+    expect(result.grooveFillPercent).toBeCloseTo(75, 12);
+    expect(result.check.status).toBe("recommend");
   });
 
   it("matches the GSRM Calculator formulas for B=49 and AN-129", () => {

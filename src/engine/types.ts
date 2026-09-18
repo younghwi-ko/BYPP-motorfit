@@ -285,9 +285,10 @@ export interface CandidateSearchConfig {
   nozzleErosionMm: number;
   manufacturingStepMm?: number;
   maxCandidateCount?: number;
-  searchPriority?: "mass" | "thrust" | "balanced";
   burnTimeFilterEnabled?: boolean;
   searchOrder?: "range" | "target-mass";
+  targetThrustEnabled?: boolean;
+  automaticExpansionStage?: number;
 }
 
 export interface CandidateScoreBreakdown {
@@ -310,11 +311,20 @@ export interface CandidateResult {
   specificImpulseSec: number;
   motorClass: string;
   score: CandidateScoreBreakdown;
-  status: "pass" | "fail";
+  status: "pass" | "conditional" | "fail";
   reasons: readonly string[];
   dataAndKn: DataAndKnResult;
   pressure: PressureResult;
   performance: PerformanceResult;
+  thrustEvaluation?: ThrustCurveEvaluation;
+}
+
+export interface ThrustCurveEvaluation {
+  targetThrustN: number;
+  meanSquaredErrorN2: number;
+  rootMeanSquaredErrorN: number;
+  maximumDeviationN: number;
+  variabilityN: number;
 }
 
 export interface CandidateSearchResult {

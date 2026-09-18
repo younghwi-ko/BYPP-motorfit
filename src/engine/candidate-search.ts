@@ -3,6 +3,7 @@ import { calculatePressure } from "./blowdown";
 import { calculatePerformance } from "./performance";
 import { scoreCandidate } from "./candidate-score";
 import { selectPropellantConstants } from "./data/propellants";
+import { evaluateThrustCurve } from "./thrust-evaluation";
 import {
   DEFAULT_MANUFACTURING_CONSTRAINTS,
   validateExcelReproductionInput,
@@ -40,14 +41,21 @@ export function validateCandidateSearchConfig(config: CandidateSearchConfig): re
   const positive = [
     ["챔버 직경", config.chamberDiameterMm], ["챔버 길이", config.chamberLengthMm],
     ["목표 연료 질량", config.targetFuelMassKg], ["질량 허용 오차", config.fuelMassToleranceKg],
-    ["최대 허용 압력", config.maximumPressureMpa], ["목표 평균 추력", config.targetAverageThrustN],
+    ["최대 허용 압력", config.maximumPressureMpa],
     ["추력 허용 오차", config.averageThrustToleranceN], ["목표 연소 시간", config.targetBurnTimeSec],
     ["시간 허용 오차", config.burnTimeToleranceSec], ["목표 압력", config.targetPressureMpa],
   ] as const;
+  if (config.targetThrustEnabled !== false && (!Number.isFinite(config.targetAverageThrustN) || config.targetAverageThrustN <= 0)) issues.push("목표 평균 추력은 0보다 큰 유한값이어야 합니다.");
   for (const [name, value] of positive) if (!Number.isFinite(value) || value <= 0) issues.push(`${name}은 0보다 큰 유한값이어야 합니다.`);
   validateRange("Do", config.outerDiameterMm, issues);
   validateRange("do", config.coreDiameterMm, issues);
   validateRange("Lo", config.segmentLengthMm, issues);
+  if (config.mode !== "excel") {
+    const step = config.manufacturingStepMm ?? 5;
+    for (const [name, range] of [["Do", config.outerDiameterMm], ["do", config.coreDiameterMm], ["Lo", config.segmentLengthMm]] as const) {
+      if (Number.isFinite(range.min) && Number.isFinite(range.max) && (range.min % step !== 0 || range.max % step !== 0)) issues.push(`${name} 범위는 ${step} mm 배수여야 합니다.`);
+    }
+  }
   if (!Number.isInteger(config.segmentCount.min) || !Number.isInteger(config.segmentCount.max) || config.segmentCount.min < 1 || config.segmentCount.max < config.segmentCount.min) issues.push("세그먼트 수 범위는 양의 정수이며 최소값이 최대값보다 클 수 없습니다.");
   if (config.manufacturingStepMm !== undefined && (!Number.isInteger(config.manufacturingStepMm) || config.manufacturingStepMm <= 0)) issues.push("제작 간격은 양의 정수 mm여야 합니다.");
   if (!Number.isFinite(config.densityRatio) || config.densityRatio <= 0) issues.push("밀도비는 0보다 큰 유한값이어야 합니다.");
@@ -89,23 +97,30 @@ export function estimateCandidateCount(config: CandidateSearchConfig): number {
 
 /** Build a bounded 5 mm manufacturing search envelope from target mass. */
 export function createAutomaticCandidateSearchConfig(config: CandidateSearchConfig): CandidateSearchConfig {
-  const chamberMax = Math.max(5, Math.floor(config.chamberDiameterMm / 5) * 5);
-  const maxLength = Math.max(85, Math.floor((config.chamberLengthMm - 5) / 5) * 5);
-  const targetScale = Math.max(1, Math.sqrt(Math.max(config.targetFuelMassKg, 0.01) / 0.3956));
-  const outerMin = 30;
-  const outerMax = Math.min(chamberMax, Math.max(50, Math.ceil(50 * targetScale / 5) * 5));
-  const coreMax = Math.max(20, Math.min(outerMax - 5, Math.ceil(20 * targetScale / 5) * 5));
-  const lengthMax = Math.min(maxLength, Math.max(85, Math.ceil(85 * targetScale / 5) * 5));
+  const massRatio = Math.max(1, Math.max(config.targetFuelMassKg, 0.01) / 0.3956);
+  const expansionStage = massRatio <= 1.5 ? 0 : massRatio <= 3.5 ? 1 : 2;
+  const linearScale = Math.cbrt(massRatio);
+  const chamberDiameterMm = expansionStage === 0 ? config.chamberDiameterMm : Math.ceil(45 * linearScale / 5) * 5;
+  const chamberLengthMm = expansionStage === 0 ? config.chamberLengthMm : Math.ceil(165 * linearScale / 5) * 5;
+  const chamberMax = Math.max(5, Math.floor(chamberDiameterMm / 5) * 5);
+  const outerMin = Math.max(30, chamberMax - 40);
+  const outerMax = chamberMax;
+  const coreMax = Math.max(20, outerMax - 10);
+  const lengthMax = Math.max(85, Math.min(chamberLengthMm, Math.ceil(85 * linearScale / 5) * 5));
+  const precisionBudget = expansionStage === 0 ? 600 : expansionStage === 1 ? 1000 : 1600;
   return {
     ...config,
+    chamberDiameterMm,
+    chamberLengthMm,
     outerDiameterMm: { min: outerMin, max: outerMax, step: 5 },
     coreDiameterMm: { min: 5, max: coreMax, step: 5 },
     segmentLengthMm: { min: 25, max: lengthMax, step: 5 },
-    segmentCount: { min: 1, max: Math.min(8, Math.max(2, Math.ceil(targetScale * 3))) },
-    maxCandidateCount: Math.min(config.maxCandidateCount ?? DEFAULT_MAX_CANDIDATES, 2500),
+    segmentCount: { min: 1, max: Math.min(8, Math.max(3, Math.ceil(linearScale * 3))) },
+    maxCandidateCount: precisionBudget,
     manufacturingStepMm: 5,
     burnTimeFilterEnabled: false,
     searchOrder: "target-mass",
+    automaticExpansionStage: expansionStage,
   };
 }
 
@@ -218,11 +233,13 @@ export function searchCandidates(config: CandidateSearchConfig): CandidateSearch
             const dataAndKn = calculateDataAndKn(input);
             const pressure = calculatePressure(dataAndKn);
             const performance = calculatePerformance(dataAndKn, pressure);
+            const thrustEvaluation = config.targetThrustEnabled === false ? undefined : evaluateThrustCurve(performance, config.targetAverageThrustN);
             const score = scoreCandidate(config, {
               grainMassKg: dataAndKn.grainMassKg,
               maximumPressureMpa: pressure.maximumGaugePressureMpa,
               burnTimeSec: pressure.burnTimeSec,
               performance,
+              thrustEvaluation,
             });
             const reasons: string[] = [];
             if (
@@ -234,7 +251,7 @@ export function searchCandidates(config: CandidateSearchConfig): CandidateSearch
             if (pressure.maximumGaugePressureMpa > config.maximumPressureMpa) {
               reasons.push("최대 압력 제한을 초과했습니다.");
             }
-            if (
+            if (config.targetThrustEnabled !== false &&
               Math.abs(
                 performance.averageThrustN - config.targetAverageThrustN,
               ) > config.averageThrustToleranceN
@@ -258,11 +275,12 @@ export function searchCandidates(config: CandidateSearchConfig): CandidateSearch
               specificImpulseSec: performance.specificImpulseSec,
               motorClass: performance.motorClass,
               score,
-              status: reasons.length === 0 ? "pass" : "fail",
+              status: reasons.length === 0 ? (config.targetThrustEnabled === false ? "conditional" : "pass") : "fail",
               reasons,
               dataAndKn,
               pressure,
               performance,
+              thrustEvaluation,
             };
             if (finiteMetrics(candidate)) candidates.push(candidate);
             else calculationFailures += 1;
@@ -272,10 +290,13 @@ export function searchCandidates(config: CandidateSearchConfig): CandidateSearch
   }
 
   candidates.sort((left, right) => {
-    if (left.status !== right.status) return left.status === "pass" ? -1 : 1;
+    if (left.status !== right.status) {
+      const order = { pass: 0, conditional: 1, fail: 2 } as const;
+      return order[left.status] - order[right.status];
+    }
     return right.score.totalScore - left.score.totalScore;
   });
-  const passedCandidates = candidates.filter((candidate) => candidate.status === "pass");
+  const passedCandidates = candidates.filter((candidate) => candidate.status !== "fail");
   const closestMassCandidate = candidates.reduce<CandidateResult | undefined>((closest, candidate) => !closest || Math.abs(candidate.grainMassKg - config.targetFuelMassKg) < Math.abs(closest.grainMassKg - config.targetFuelMassKg) ? candidate : closest, undefined);
   const closestThrustCandidate = candidates.reduce<CandidateResult | undefined>((closest, candidate) => !closest || Math.abs(candidate.averageThrustN - config.targetAverageThrustN) < Math.abs(closest.averageThrustN - config.targetAverageThrustN) ? candidate : closest, undefined);
   const pressurePassing = candidates.filter((candidate) => candidate.maximumPressureMpa <= config.maximumPressureMpa);
@@ -293,7 +314,7 @@ export function searchCandidates(config: CandidateSearchConfig): CandidateSearch
             ? "입력한 질량과 추력 조합을 동시에 만족하는 후보 없음"
             : "목표 조건 동시 충족 후보 있음";
   const automaticSummary = config.searchOrder === "target-mass"
-    ? `전체 후보 ${totalCombinations.toLocaleString()}개, 질량 사전 계산 ${geometries.length.toLocaleString()}개, 정밀 계산 ${evaluatedCombinations.toLocaleString()}개, 목표 질량 근처 후보 ${targetMassNearbyIncluded ? "포함" : "누락"}. 가장 가까운 질량 ${closestMassCandidate?.grainMassKg.toFixed(4) ?? "없음"} kg, 가장 가까운 추력 ${closestThrustCandidate?.averageThrustN.toFixed(2) ?? "없음"} N. 진단: ${automaticDiagnosis}.`
+    ? `자동 탐색 확장 ${config.automaticExpansionStage ?? 0}단계. 전체 후보 ${totalCombinations.toLocaleString()}개, 사전 제외 ${rejectedByValidation.toLocaleString()}개, 질량 계산 ${geometries.length.toLocaleString()}개, 정밀 계산 ${evaluatedCombinations.toLocaleString()}개, 목표 질량 근처 후보 ${targetMassNearbyIncluded ? "포함" : "누락"}. 가장 가까운 질량 ${closestMassCandidate?.grainMassKg.toFixed(4) ?? "없음"} kg, 가장 가까운 추력 ${config.targetThrustEnabled === false ? "미입력" : `${closestThrustCandidate?.averageThrustN.toFixed(2) ?? "없음"} N`}. 진단: ${automaticDiagnosis}.`
     : undefined;
   return {
     candidates,

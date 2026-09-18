@@ -99,11 +99,25 @@ describe("candidate search", () => {
     expect(() => searchCandidates({ ...BASE_CONFIG, averageThrustToleranceN: Number.NaN })).toThrow(CandidateSearchInputError);
     expect(() => searchCandidates({ ...BASE_CONFIG, outerDiameterMm: { min: 50, max: 45 } })).toThrow(CandidateSearchInputError);
     expect(() => searchCandidates({ ...BASE_CONFIG, segmentCount: { min: 0, max: 2 } })).toThrow(CandidateSearchInputError);
+    expect(() => searchCandidates({ ...BASE_CONFIG, outerDiameterMm: { min: 40, max: 46, step: 5 } })).toThrow(CandidateSearchInputError);
+  });
+
+  it("calculates every combination in a finite detailed range", () => {
+    const result = searchCandidates({
+      ...BASE_CONFIG,
+      outerDiameterMm: { min: 40, max: 45, step: 5 },
+      coreDiameterMm: { min: 10, max: 15, step: 5 },
+      segmentLengthMm: { min: 75, max: 80, step: 5 },
+      segmentCount: { min: 1, max: 1 },
+    });
+    expect(result.totalCombinations).toBe(8);
+    expect(result.evaluatedCombinations).toBe(8);
+    expect(result.truncated).toBe(false);
   });
 });
 
 describe("candidate score", () => {
-  it("combines four normalized components with equal weights", () => {
+  it("uses the fixed mass, pressure, and thrust comparison model", () => {
     const score = scoreCandidate(BASE_CONFIG, {
       grainMassKg: BASE_CONFIG.targetFuelMassKg + 0.0005,
       maximumPressureMpa: 3,
@@ -117,7 +131,7 @@ describe("candidate score", () => {
     expect(score.pressureMarginNormalized).toBeCloseTo(0.75, 12);
     expect(score.averageThrustErrorNormalized).toBeCloseTo(0.5, 12);
     expect(score.burnTimeErrorNormalized).toBeCloseTo(0.5, 12);
-    expect(score.totalScore).toBeCloseTo(43.75, 11);
+    expect(score.totalScore).toBeCloseTo(45, 11);
   });
 });
 
@@ -129,42 +143,49 @@ describe("automatic candidate envelope", () => {
     expect(config.burnTimeFilterEnabled).toBe(false);
   });
 
-  it("mass-prefilters the baseline geometry into a 200-candidate precision budget", () => {
+  it("mass-prefilters the baseline geometry without the former fixed 200-candidate cap", () => {
     const automatic = createAutomaticCandidateSearchConfig({
       ...BASE_CONFIG,
       maximumPressureMpa: 4.1,
       fuelMassToleranceKg: 0.005,
       averageThrustToleranceN: 5,
-      maxCandidateCount: 200,
-      searchPriority: "balanced",
+      targetThrustEnabled: true,
     });
     const result = searchCandidates(automatic);
     const baseline = result.candidates.find((candidate) => candidate.input.grainOuterDiameterMm === 45 && candidate.input.grainCoreDiameterMm === 15 && candidate.input.segmentLengthMm === 80 && candidate.input.segmentCount === 2);
     expect(result.totalCombinations).toBeGreaterThan(200);
-    expect(result.evaluatedCombinations).toBe(200);
+    expect(result.evaluatedCombinations).toBeGreaterThan(200);
     expect(result.targetMassNearbyIncluded).toBe(true);
     expect(baseline).toBeDefined();
     expect(baseline!.grainMassKg).toBeCloseTo(0.395603169947702, 12);
     expect(baseline!.averageThrustN).toBeCloseTo(209.84475504584, 10);
     expect(baseline!.status).toBe("pass");
     expect(result.candidates[0].input).toMatchObject({ grainOuterDiameterMm: 45, grainCoreDiameterMm: 15, segmentLengthMm: 80, segmentCount: 2 });
-    expect(result.warning).toContain("목표 질량 근처 후보를 우선 평가했습니다");
+    expect(result.warning).toContain("자동 탐색 확장 0단계");
   });
 
-  it("does not let priority weighting remove the closest-mass candidate", () => {
-    for (const searchPriority of ["mass", "thrust", "balanced"] as const) {
-      const automatic = createAutomaticCandidateSearchConfig({ ...BASE_CONFIG, maxCandidateCount: 20, searchPriority });
-      const result = searchCandidates(automatic);
-      expect(result.targetMassNearbyIncluded).toBe(true);
-      expect(result.evaluatedCombinations).toBe(20);
-    }
+  it("keeps the closest-mass candidate when target thrust is omitted", () => {
+    const automatic = createAutomaticCandidateSearchConfig({ ...BASE_CONFIG, targetThrustEnabled: false });
+    const result = searchCandidates(automatic);
+    expect(result.targetMassNearbyIncluded).toBe(true);
+    expect(result.candidates[0].status).toBe("conditional");
   });
 
   it("reports the real limiting condition for a 1 kg target", () => {
-    const automatic = createAutomaticCandidateSearchConfig({ ...BASE_CONFIG, targetFuelMassKg: 1, maximumPressureMpa: 4.1, maxCandidateCount: 200, searchPriority: "balanced" });
+    const automatic = createAutomaticCandidateSearchConfig({ ...BASE_CONFIG, targetFuelMassKg: 1, maximumPressureMpa: 4.1, targetThrustEnabled: false });
     const result = searchCandidates(automatic);
     expect(result.prefilteredCandidateCount).toBeGreaterThan(200);
     expect(result.targetMassNearbyIncluded).toBe(true);
     expect(result.warning).toMatch(/목표 질량 후보 없음|최대 압력 초과|평균 추력 불일치|동시에 만족/);
+  });
+
+  it("expands chamber diameter and Do for 1 kg and 2 kg targets", () => {
+    const oneKg = createAutomaticCandidateSearchConfig({ ...BASE_CONFIG, targetFuelMassKg: 1 });
+    const twoKg = createAutomaticCandidateSearchConfig({ ...BASE_CONFIG, targetFuelMassKg: 2 });
+    expect(oneKg.chamberDiameterMm).toBeGreaterThan(45);
+    expect(oneKg.outerDiameterMm.max).toBe(oneKg.chamberDiameterMm);
+    expect(twoKg.chamberDiameterMm).toBeGreaterThan(oneKg.chamberDiameterMm);
+    expect(twoKg.outerDiameterMm.max).toBeGreaterThan(oneKg.outerDiameterMm.max);
+    expect(twoKg.automaticExpansionStage).toBe(2);
   });
 });

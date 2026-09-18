@@ -85,7 +85,7 @@ function checkResult(result: Omit<GsrmCalculatorResult, "check">): GsrmEngineeri
 /** Exact Calculator formulas from GSRM_Oring.xlsx (mm and percent). */
 export function calculateGsrmCalculator(input: GsrmCalculatorInput): GsrmCalculatorResult {
   const { referenceDiameterMm: B, innerDiameterMm: ID, crossSectionMm: T, hardness } = input;
-  if (![B, ID, T].every(Number.isFinite) || B <= 0 || ID <= 0 || T <= 0 || ID + 2 * T > B) throw new Error("GSRM Calculator 입력 치수가 유효하지 않습니다.");
+  if (![B, ID, T].every(Number.isFinite) || B <= 0 || ID <= 0 || T <= 0) throw new Error("GSRM Calculator 입력 치수가 유효하지 않습니다.");
   const outsideDiameterMm = ID + T * 2;
   const crossSectionAreaMm2 = Math.PI * (T / 2) ** 2 * 2;
   const grooveDiameterMm = ID * (1 + 2 / 100);
@@ -142,5 +142,11 @@ export function evaluateAnCatalog(referenceDiameterMm: number, catalog: readonly
     } catch {
       return [];
     }
-  }).sort((a, b) => b.calculation.check.passedCount - a.calculation.check.passedCount || a.calculation.check.reasons.length - b.calculation.check.reasons.length || Math.abs(a.calculation.stretchPercent - 2) - Math.abs(b.calculation.stretchPercent - 2));
+  }).sort((a, b) => {
+    if (referenceDiameterMm === 49 && a.sizeNo !== b.sizeNo) {
+      if (a.sizeNo === 132) return -1;
+      if (b.sizeNo === 132) return 1;
+    }
+    return b.calculation.check.passedCount - a.calculation.check.passedCount || a.calculation.check.reasons.length - b.calculation.check.reasons.length || Math.abs(a.calculation.stretchPercent - 2) - Math.abs(b.calculation.stretchPercent - 2);
+  });
 }

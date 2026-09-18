@@ -50,4 +50,4 @@ export const AN_SERIES_CATALOG: readonly GsrmCatalogCandidate[] = groups.flatMap
   };
 }));
 
-export const DEFAULT_AN_CANDIDATE = AN_SERIES_CATALOG.find((item) => item.sizeNo === 129)!;
+export const DEFAULT_AN_CANDIDATE = AN_SERIES_CATALOG.find((item) => item.sizeNo === 132)!;
