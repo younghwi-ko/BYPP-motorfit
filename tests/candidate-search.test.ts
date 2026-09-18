@@ -128,4 +128,43 @@ describe("automatic candidate envelope", () => {
     expect(config.manufacturingStepMm).toBe(5);
     expect(config.burnTimeFilterEnabled).toBe(false);
   });
+
+  it("mass-prefilters the baseline geometry into a 200-candidate precision budget", () => {
+    const automatic = createAutomaticCandidateSearchConfig({
+      ...BASE_CONFIG,
+      maximumPressureMpa: 4.1,
+      fuelMassToleranceKg: 0.005,
+      averageThrustToleranceN: 5,
+      maxCandidateCount: 200,
+      searchPriority: "balanced",
+    });
+    const result = searchCandidates(automatic);
+    const baseline = result.candidates.find((candidate) => candidate.input.grainOuterDiameterMm === 45 && candidate.input.grainCoreDiameterMm === 15 && candidate.input.segmentLengthMm === 80 && candidate.input.segmentCount === 2);
+    expect(result.totalCombinations).toBeGreaterThan(200);
+    expect(result.evaluatedCombinations).toBe(200);
+    expect(result.targetMassNearbyIncluded).toBe(true);
+    expect(baseline).toBeDefined();
+    expect(baseline!.grainMassKg).toBeCloseTo(0.395603169947702, 12);
+    expect(baseline!.averageThrustN).toBeCloseTo(209.84475504584, 10);
+    expect(baseline!.status).toBe("pass");
+    expect(result.candidates[0].input).toMatchObject({ grainOuterDiameterMm: 45, grainCoreDiameterMm: 15, segmentLengthMm: 80, segmentCount: 2 });
+    expect(result.warning).toContain("목표 질량 근처 후보를 우선 평가했습니다");
+  });
+
+  it("does not let priority weighting remove the closest-mass candidate", () => {
+    for (const searchPriority of ["mass", "thrust", "balanced"] as const) {
+      const automatic = createAutomaticCandidateSearchConfig({ ...BASE_CONFIG, maxCandidateCount: 20, searchPriority });
+      const result = searchCandidates(automatic);
+      expect(result.targetMassNearbyIncluded).toBe(true);
+      expect(result.evaluatedCombinations).toBe(20);
+    }
+  });
+
+  it("reports the real limiting condition for a 1 kg target", () => {
+    const automatic = createAutomaticCandidateSearchConfig({ ...BASE_CONFIG, targetFuelMassKg: 1, maximumPressureMpa: 4.1, maxCandidateCount: 200, searchPriority: "balanced" });
+    const result = searchCandidates(automatic);
+    expect(result.prefilteredCandidateCount).toBeGreaterThan(200);
+    expect(result.targetMassNearbyIncluded).toBe(true);
+    expect(result.warning).toMatch(/목표 질량 후보 없음|최대 압력 초과|평균 추력 불일치|동시에 만족/);
+  });
 });

@@ -2,6 +2,7 @@ import { calculateDataAndKn } from "./data-and-kn";
 import { calculatePressure } from "./blowdown";
 import { calculatePerformance } from "./performance";
 import { scoreCandidate } from "./candidate-score";
+import { selectPropellantConstants } from "./data/propellants";
 import {
   DEFAULT_MANUFACTURING_CONSTRAINTS,
   validateExcelReproductionInput,
@@ -88,7 +89,7 @@ export function estimateCandidateCount(config: CandidateSearchConfig): number {
 
 /** Build a bounded 5 mm manufacturing search envelope from target mass. */
 export function createAutomaticCandidateSearchConfig(config: CandidateSearchConfig): CandidateSearchConfig {
-  const chamberMax = Math.max(50, Math.floor((config.chamberDiameterMm - 5) / 5) * 5);
+  const chamberMax = Math.max(5, Math.floor(config.chamberDiameterMm / 5) * 5);
   const maxLength = Math.max(85, Math.floor((config.chamberLengthMm - 5) / 5) * 5);
   const targetScale = Math.max(1, Math.sqrt(Math.max(config.targetFuelMassKg, 0.01) / 0.3956));
   const outerMin = 30;
@@ -104,7 +105,22 @@ export function createAutomaticCandidateSearchConfig(config: CandidateSearchConf
     maxCandidateCount: Math.min(config.maxCandidateCount ?? DEFAULT_MAX_CANDIDATES, 2500),
     manufacturingStepMm: 5,
     burnTimeFilterEnabled: false,
+    searchOrder: "target-mass",
   };
+}
+
+interface CandidateGeometry {
+  outerDiameterMm: number;
+  coreDiameterMm: number;
+  segmentLengthMm: number;
+  segmentCount: number;
+  approximateMassKg: number;
+}
+
+function approximateGrainMassKg(config: CandidateSearchConfig, outerDiameterMm: number, coreDiameterMm: number, segmentLengthMm: number, segmentCount: number): number {
+  const density = config.densityRatio * selectPropellantConstants(config.propellant).idealDensityGPerCm3;
+  const volumeMm3 = Math.PI * (outerDiameterMm ** 2 - coreDiameterMm ** 2) * segmentLengthMm * segmentCount / 4;
+  return density * volumeMm3 / 1_000_000;
 }
 
 function finiteMetrics(candidate: CandidateResult): boolean {
@@ -142,11 +158,33 @@ export function searchCandidates(config: CandidateSearchConfig): CandidateSearch
   let rejectedByValidation = 0;
   let calculationFailures = 0;
 
-  outerLoop: for (const outerDiameterMm of outerValues) {
+  const geometries: CandidateGeometry[] = [];
+  for (const outerDiameterMm of outerValues) {
     for (const coreDiameterMm of coreValues) {
       for (const segmentLengthMm of lengthValues) {
         for (const segmentCount of segmentValues) {
-          if (evaluatedCombinations >= maxCandidateCount) break outerLoop;
+          if (config.searchOrder === "target-mass" && (outerDiameterMm <= coreDiameterMm || outerDiameterMm > config.chamberDiameterMm || segmentLengthMm * segmentCount > config.chamberLengthMm)) {
+            rejectedByValidation += 1;
+            continue;
+          }
+          geometries.push({
+            outerDiameterMm,
+            coreDiameterMm,
+            segmentLengthMm,
+            segmentCount,
+            approximateMassKg: approximateGrainMassKg(config, outerDiameterMm, coreDiameterMm, segmentLengthMm, segmentCount),
+          });
+        }
+      }
+    }
+  }
+  if (config.searchOrder === "target-mass") {
+    geometries.sort((left, right) => Math.abs(left.approximateMassKg - config.targetFuelMassKg) - Math.abs(right.approximateMassKg - config.targetFuelMassKg));
+  }
+  const precisionGeometries = geometries.slice(0, maxCandidateCount);
+  const targetMassNearbyIncluded = geometries.length === 0 || precisionGeometries.includes(geometries[0]);
+
+  for (const { outerDiameterMm, coreDiameterMm, segmentLengthMm, segmentCount } of precisionGeometries) {
           evaluatedCombinations += 1;
           const input: DataAndKnInput = {
             chamberDiameterMm: config.chamberDiameterMm,
@@ -231,9 +269,6 @@ export function searchCandidates(config: CandidateSearchConfig): CandidateSearch
           } catch {
             calculationFailures += 1;
           }
-        }
-      }
-    }
   }
 
   candidates.sort((left, right) => {
@@ -241,6 +276,25 @@ export function searchCandidates(config: CandidateSearchConfig): CandidateSearch
     return right.score.totalScore - left.score.totalScore;
   });
   const passedCandidates = candidates.filter((candidate) => candidate.status === "pass");
+  const closestMassCandidate = candidates.reduce<CandidateResult | undefined>((closest, candidate) => !closest || Math.abs(candidate.grainMassKg - config.targetFuelMassKg) < Math.abs(closest.grainMassKg - config.targetFuelMassKg) ? candidate : closest, undefined);
+  const closestThrustCandidate = candidates.reduce<CandidateResult | undefined>((closest, candidate) => !closest || Math.abs(candidate.averageThrustN - config.targetAverageThrustN) < Math.abs(closest.averageThrustN - config.targetAverageThrustN) ? candidate : closest, undefined);
+  const pressurePassing = candidates.filter((candidate) => candidate.maximumPressureMpa <= config.maximumPressureMpa);
+  const hasMassMatch = pressurePassing.some((candidate) => Math.abs(candidate.grainMassKg - config.targetFuelMassKg) <= config.fuelMassToleranceKg);
+  const hasThrustMatch = pressurePassing.some((candidate) => Math.abs(candidate.averageThrustN - config.targetAverageThrustN) <= config.averageThrustToleranceN);
+  const automaticDiagnosis = candidates.length === 0
+    ? "탐색 범위에 계산 가능한 후보 없음"
+    : pressurePassing.length === 0
+      ? "후보는 있지만 최대 압력 초과"
+      : !hasMassMatch
+        ? "검색 범위에 목표 질량 후보 없음"
+        : !hasThrustMatch
+          ? "후보는 있지만 평균 추력 불일치"
+          : passedCandidates.length === 0
+            ? "입력한 질량과 추력 조합을 동시에 만족하는 후보 없음"
+            : "목표 조건 동시 충족 후보 있음";
+  const automaticSummary = config.searchOrder === "target-mass"
+    ? `전체 후보 ${totalCombinations.toLocaleString()}개, 질량 사전 계산 ${geometries.length.toLocaleString()}개, 정밀 계산 ${evaluatedCombinations.toLocaleString()}개, 목표 질량 근처 후보 ${targetMassNearbyIncluded ? "포함" : "누락"}. 가장 가까운 질량 ${closestMassCandidate?.grainMassKg.toFixed(4) ?? "없음"} kg, 가장 가까운 추력 ${closestThrustCandidate?.averageThrustN.toFixed(2) ?? "없음"} N. 진단: ${automaticDiagnosis}.`
+    : undefined;
   return {
     candidates,
     passedCandidates,
@@ -248,9 +302,13 @@ export function searchCandidates(config: CandidateSearchConfig): CandidateSearch
     evaluatedCombinations,
     rejectedByValidation,
     calculationFailures,
+    prefilteredCandidateCount: geometries.length,
+    targetMassNearbyIncluded,
     truncated,
     warning: truncated
-      ? `후보 조합 ${totalCombinations.toLocaleString()}개 중 ${maxCandidateCount.toLocaleString()}개까지만 계산했습니다.`
-      : undefined,
+      ? config.searchOrder === "target-mass"
+        ? `후보 조합 중 일부만 정밀 계산했으며, 목표 질량 근처 후보를 우선 평가했습니다. ${automaticSummary}`
+        : `후보 조합 ${totalCombinations.toLocaleString()}개 중 ${maxCandidateCount.toLocaleString()}개까지만 계산했습니다.`
+      : automaticSummary,
   };
 }

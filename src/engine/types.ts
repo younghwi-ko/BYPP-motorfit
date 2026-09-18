@@ -287,6 +287,7 @@ export interface CandidateSearchConfig {
   maxCandidateCount?: number;
   searchPriority?: "mass" | "thrust" | "balanced";
   burnTimeFilterEnabled?: boolean;
+  searchOrder?: "range" | "target-mass";
 }
 
 export interface CandidateScoreBreakdown {
@@ -323,6 +324,8 @@ export interface CandidateSearchResult {
   evaluatedCombinations: number;
   rejectedByValidation: number;
   calculationFailures: number;
+  prefilteredCandidateCount?: number;
+  targetMassNearbyIncluded?: boolean;
   truncated: boolean;
   warning?: string;
 }
