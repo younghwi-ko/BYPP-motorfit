@@ -14,6 +14,8 @@ export {
 } from "./blowdown";
 export { calculatePerformance } from "./performance";
 export { createMotorOutput } from "./output";
+export { scoreCandidate } from "./candidate-score";
+export { estimateCandidateCount, searchCandidates } from "./candidate-search";
 export { selectBurnRateCoefficients, BURN_RATE_PRESSURE_BANDS } from "./data/burnrate";
 export { classifyMotor, MOTOR_CLASS_BANDS } from "./data/motor-class";
 export { solveBisection } from "./solvers/bisection";
@@ -30,6 +32,12 @@ export type {
   BurnRateCoefficients,
   BurnRatePressureBand,
   BlowdownOptions,
+  CandidateIntegerRange,
+  CandidateNumberRange,
+  CandidateResult,
+  CandidateScoreBreakdown,
+  CandidateSearchConfig,
+  CandidateSearchResult,
   DataAndKnInput,
   DataAndKnResult,
   KnCurvePoint,

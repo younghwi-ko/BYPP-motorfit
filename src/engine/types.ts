@@ -249,3 +249,78 @@ export interface ValidationIssue {
 export interface ManufacturingConstraints {
   dimensionalStepMm: number;
 }
+
+export interface CandidateNumberRange {
+  min: number;
+  max: number;
+  step?: number;
+}
+
+export interface CandidateIntegerRange {
+  min: number;
+  max: number;
+}
+
+export interface CandidateSearchConfig {
+  mode?: "candidate" | "excel";
+  chamberDiameterMm: number;
+  chamberLengthMm: number;
+  propellant: PropellantId;
+  targetFuelMassKg: number;
+  fuelMassToleranceKg: number;
+  maximumPressureMpa: number;
+  targetAverageThrustN: number;
+  averageThrustToleranceN: number;
+  targetBurnTimeSec: number;
+  burnTimeToleranceSec: number;
+  targetPressureMpa: number;
+  outerDiameterMm: CandidateNumberRange;
+  coreDiameterMm: CandidateNumberRange;
+  segmentLengthMm: CandidateNumberRange;
+  segmentCount: CandidateIntegerRange;
+  outerSurface: SurfaceCondition;
+  coreSurface: SurfaceCondition;
+  endsSurface: SurfaceCondition;
+  densityRatio: number;
+  nozzleErosionMm: number;
+  manufacturingStepMm?: number;
+  maxCandidateCount?: number;
+}
+
+export interface CandidateScoreBreakdown {
+  massErrorNormalized: number;
+  pressureMarginNormalized: number;
+  averageThrustErrorNormalized: number;
+  burnTimeErrorNormalized: number;
+  totalScore: number;
+}
+
+export interface CandidateResult {
+  input: DataAndKnInput;
+  grainMassKg: number;
+  maximumPressureMpa: number;
+  burnTimeSec: number;
+  thrustEndTimeSec: number;
+  maximumThrustN: number;
+  averageThrustN: number;
+  totalImpulseNs: number;
+  specificImpulseSec: number;
+  motorClass: string;
+  score: CandidateScoreBreakdown;
+  status: "pass" | "fail";
+  reasons: readonly string[];
+  dataAndKn: DataAndKnResult;
+  pressure: PressureResult;
+  performance: PerformanceResult;
+}
+
+export interface CandidateSearchResult {
+  candidates: readonly CandidateResult[];
+  passedCandidates: readonly CandidateResult[];
+  totalCombinations: number;
+  evaluatedCombinations: number;
+  rejectedByValidation: number;
+  calculationFailures: number;
+  truncated: boolean;
+  warning?: string;
+}
