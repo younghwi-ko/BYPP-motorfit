@@ -5,9 +5,11 @@ import {
   createAutomaticCandidateSearchConfig,
   CandidateSearchCancelledError,
   CandidateSearchInputError,
+  MASS_UPPER_EPSILON_KG,
   scoreCandidate,
   searchCandidates,
   searchCandidatesAsync,
+  isWithinMassUpperBound,
 } from "../src/engine";
 import type { CandidateSearchConfig, PerformanceResult } from "../src/engine";
 
@@ -35,6 +37,11 @@ const BASE_CONFIG: CandidateSearchConfig = {
 };
 
 describe("candidate search", () => {
+  it("uses a documented epsilon only for display-level mass differences", () => {
+    expect(MASS_UPPER_EPSILON_KG).toBe(0.000005);
+    expect(isWithinMassUpperBound(0.395603169947702, 0.3956)).toBe(true);
+    expect(isWithinMassUpperBound(0.395606, 0.3956)).toBe(false);
+  });
   it("counts inclusive 5 mm ranges and integer segment ranges", () => {
     expect(
       estimateCandidateCount({
@@ -202,6 +209,29 @@ describe("automatic candidate envelope", () => {
     expect(result.candidates[0].maximumPressureMpa).toBeLessThanOrEqual(4.1);
     expect(result.candidates[0].dataAndKn.knCurve.every((row) => Number.isFinite(row.kn))).toBe(true);
     expect(result.candidates[0].pressure.combustion.rows.every((row) => Number.isFinite(row.gaugePressureMpa))).toBe(true);
+  });
+
+  it("hard-filters mass overshoot for baseline, 1 kg, and 2 kg targets", () => {
+    for (const targetFuelMassKg of [0.3956, 1, 2]) {
+      const result = searchCandidates(createAutomaticCandidateSearchConfig({ ...BASE_CONFIG, targetFuelMassKg, maximumPressureMpa: 4.1, targetThrustEnabled: false }));
+      expect(result.candidates.every((candidate) => isWithinMassUpperBound(candidate.grainMassKg, targetFuelMassKg))).toBe(true);
+      expect(result.passedCandidates.every((candidate) => candidate.grainMassKg <= targetFuelMassKg + MASS_UPPER_EPSILON_KG)).toBe(true);
+    }
+  }, 20_000);
+
+  it("ranks the closest below-target candidate first when no candidate passes", () => {
+    const targetFuelMassKg = 2;
+    const result = searchCandidates(createAutomaticCandidateSearchConfig({ ...BASE_CONFIG, targetFuelMassKg, maximumPressureMpa: 4.1, targetThrustEnabled: false }));
+    const closest = result.candidates.reduce((left, right) => Math.abs(left.grainMassKg - targetFuelMassKg) <= Math.abs(right.grainMassKg - targetFuelMassKg) ? left : right);
+    expect(result.candidates[0].grainMassKg).toBe(closest.grainMassKg);
+    expect(result.candidates[0].grainMassKg).toBeLessThanOrEqual(targetFuelMassKg + MASS_UPPER_EPSILON_KG);
+  });
+
+  it("reports when no candidate is at or below the target mass", () => {
+    const result = searchCandidates(createAutomaticCandidateSearchConfig({ ...BASE_CONFIG, targetFuelMassKg: 0.000001, targetThrustEnabled: false }));
+    expect(result.candidates).toHaveLength(0);
+    expect(result.diagnosis).toBe("목표 질량 이하 후보를 찾지 못했습니다.");
+    expect(result.warning).toContain("목표 질량 이하 후보를 찾지 못했습니다.");
   });
 
   it("reports real asynchronous progress and honours cancellation between batches", async () => {

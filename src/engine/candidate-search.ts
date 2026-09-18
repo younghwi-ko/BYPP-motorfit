@@ -20,6 +20,16 @@ import type {
 
 const DEFAULT_MAX_CANDIDATES = 2_000;
 
+/**
+ * Allows the tiny 0.395603... kg vs 0.3956 kg baseline difference caused by
+ * displayed/input precision, while still hard-rejecting meaningful overshoot.
+ */
+export const MASS_UPPER_EPSILON_KG = 5e-6;
+
+export function isWithinMassUpperBound(massKg: number, targetMassKg: number): boolean {
+  return massKg <= targetMassKg + MASS_UPPER_EPSILON_KG;
+}
+
 export class CandidateSearchInputError extends Error {
   readonly issues: readonly string[];
   constructor(issues: readonly string[]) {
@@ -131,6 +141,7 @@ interface PreparedSearch {
   prevalidationRejectedCount: number;
   geometries: CandidateGeometry[];
   precisionGeometries: CandidateGeometry[];
+  massFilteredCount: number;
   truncated: boolean;
   targetMassNearbyIncluded: boolean;
 }
@@ -156,13 +167,19 @@ function prepareSearch(config: CandidateSearchConfig): PreparedSearch {
   const segmentValues = integerValues(config.segmentCount.min, config.segmentCount.max);
   const totalCombinations = outerValues.length * coreValues.length * lengthValues.length * segmentValues.length;
   let prevalidationRejectedCount = 0;
+  let massFilteredCount = 0;
   const geometries: CandidateGeometry[] = [];
   for (const outerDiameterMm of outerValues) for (const coreDiameterMm of coreValues) for (const segmentLengthMm of lengthValues) for (const segmentCount of segmentValues) {
     if (config.searchOrder === "target-mass" && (outerDiameterMm <= coreDiameterMm || outerDiameterMm > config.chamberDiameterMm || segmentLengthMm * segmentCount > config.chamberLengthMm)) {
       prevalidationRejectedCount += 1;
       continue;
     }
-    geometries.push({ outerDiameterMm, coreDiameterMm, segmentLengthMm, segmentCount, approximateMassKg: approximateGrainMassKg(config, outerDiameterMm, coreDiameterMm, segmentLengthMm, segmentCount) });
+    const approximateMassKg = approximateGrainMassKg(config, outerDiameterMm, coreDiameterMm, segmentLengthMm, segmentCount);
+    if (!isWithinMassUpperBound(approximateMassKg, config.targetFuelMassKg)) {
+      massFilteredCount += 1;
+      continue;
+    }
+    geometries.push({ outerDiameterMm, coreDiameterMm, segmentLengthMm, segmentCount, approximateMassKg });
   }
   if (config.searchOrder === "target-mass") geometries.sort((left, right) => Math.abs(left.approximateMassKg - config.targetFuelMassKg) - Math.abs(right.approximateMassKg - config.targetFuelMassKg));
   const maxCandidateCount = config.maxCandidateCount ?? DEFAULT_MAX_CANDIDATES;
@@ -172,6 +189,7 @@ function prepareSearch(config: CandidateSearchConfig): PreparedSearch {
     prevalidationRejectedCount,
     geometries,
     precisionGeometries,
+    massFilteredCount,
     truncated: geometries.length > maxCandidateCount,
     targetMassNearbyIncluded: geometries.length === 0 || precisionGeometries.includes(geometries[0]),
   };
@@ -198,6 +216,7 @@ function evaluateGeometry(config: CandidateSearchConfig, geometry: CandidateGeom
     const thrustEvaluation = config.targetThrustEnabled === false ? undefined : evaluateThrustCurve(performance, config.targetAverageThrustN);
     const score = scoreCandidate(config, { grainMassKg: dataAndKn.grainMassKg, maximumPressureMpa: pressure.maximumGaugePressureMpa, burnTimeSec: pressure.burnTimeSec, performance, thrustEvaluation });
     const reasons: string[] = [];
+    if (!isWithinMassUpperBound(dataAndKn.grainMassKg, config.targetFuelMassKg)) reasons.push("목표 연료 질량을 초과했습니다.");
     if (Math.abs(dataAndKn.grainMassKg - config.targetFuelMassKg) > config.fuelMassToleranceKg) reasons.push("연료 질량 허용 범위를 벗어났습니다.");
     if (pressure.maximumGaugePressureMpa > config.maximumPressureMpa) reasons.push("최대 압력 제한을 초과했습니다.");
     if (config.targetThrustEnabled !== false && Math.abs(performance.averageThrustN - config.targetAverageThrustN) > config.averageThrustToleranceN) reasons.push("평균 추력 허용 범위를 벗어났습니다.");
@@ -223,6 +242,8 @@ function finishSearch(config: CandidateSearchConfig, prepared: PreparedSearch, c
       const order = { pass: 0, conditional: 1, fail: 2 } as const;
       return order[left.status] - order[right.status];
     }
+    const massDistance = Math.abs(left.grainMassKg - config.targetFuelMassKg) - Math.abs(right.grainMassKg - config.targetFuelMassKg);
+    if (massDistance !== 0) return massDistance;
     return right.score.totalScore - left.score.totalScore;
   });
   const passedCandidates = candidates.filter((candidate) => candidate.status !== "fail");
@@ -231,9 +252,9 @@ function finishSearch(config: CandidateSearchConfig, prepared: PreparedSearch, c
   const pressurePassing = candidates.filter((candidate) => candidate.maximumPressureMpa <= config.maximumPressureMpa);
   const hasMassMatch = pressurePassing.some((candidate) => Math.abs(candidate.grainMassKg - config.targetFuelMassKg) <= config.fuelMassToleranceKg);
   const hasThrustMatch = config.targetThrustEnabled === false || pressurePassing.some((candidate) => Math.abs(candidate.averageThrustN - config.targetAverageThrustN) <= config.averageThrustToleranceN);
-  const automaticDiagnosis = candidates.length === 0 ? "탐색 범위에 계산 가능한 후보 없음" : pressurePassing.length === 0 ? "후보는 있지만 최대 압력 초과" : !hasMassMatch ? "검색 범위에 목표 질량 후보 없음" : !hasThrustMatch ? "후보는 있지만 평균 추력 불일치" : passedCandidates.length === 0 ? "입력한 질량과 추력 조합을 동시에 만족하는 후보 없음" : "목표 조건 동시 충족 후보 있음";
+  const automaticDiagnosis = prepared.geometries.length === 0 ? "목표 질량 이하 후보를 찾지 못했습니다." : candidates.length === 0 ? "탐색 범위에 계산 가능한 후보 없음" : pressurePassing.length === 0 ? "후보는 있지만 최대 압력 초과" : !hasMassMatch ? "검색 범위에 목표 질량 후보 없음" : !hasThrustMatch ? "후보는 있지만 평균 추력 불일치" : passedCandidates.length === 0 ? "입력한 질량과 추력 조합을 동시에 만족하는 후보 없음" : "목표 조건 동시 충족 후보 있음";
   const automaticSummary = config.searchOrder === "target-mass"
-    ? `자동 탐색 확장 ${config.automaticExpansionStage ?? 0}단계. 전체 후보 ${prepared.totalCombinations.toLocaleString()}개, 정밀 계산 전 제외 ${prepared.prevalidationRejectedCount.toLocaleString()}개, 질량 계산 ${prepared.geometries.length.toLocaleString()}개, 정밀 계산 ${counters.evaluatedCombinations.toLocaleString()}개, 정밀 검증 탈락 ${counters.precisionValidationRejectedCount.toLocaleString()}개, 목표 질량 근처 후보 ${prepared.targetMassNearbyIncluded ? "포함" : "누락"}. 가장 가까운 질량 ${closestMassCandidate?.grainMassKg.toFixed(4) ?? "없음"} kg, 가장 가까운 추력 ${config.targetThrustEnabled === false ? "미입력" : `${closestThrustCandidate?.averageThrustN.toFixed(2) ?? "없음"} N`}. 진단: ${automaticDiagnosis}.`
+    ? `자동 탐색 확장 ${config.automaticExpansionStage ?? 0}단계. 전체 후보 ${prepared.totalCombinations.toLocaleString()}개, 정밀 계산 전 형상 제외 ${prepared.prevalidationRejectedCount.toLocaleString()}개, 질량 상한 제외 ${prepared.massFilteredCount.toLocaleString()}개, 질량 계산 ${prepared.geometries.length.toLocaleString()}개, 정밀 계산 ${counters.evaluatedCombinations.toLocaleString()}개, 정밀 검증 탈락 ${counters.precisionValidationRejectedCount.toLocaleString()}개, 목표 질량 근처 후보 ${prepared.targetMassNearbyIncluded ? "포함" : "누락"}. 가장 가까운 질량 ${closestMassCandidate?.grainMassKg.toFixed(4) ?? "없음"} kg, 가장 가까운 추력 ${config.targetThrustEnabled === false ? "미입력" : `${closestThrustCandidate?.averageThrustN.toFixed(2) ?? "없음"} N`}. 진단: ${automaticDiagnosis}.`
     : undefined;
   const partialWarning = "전체 조합 중 목표 질량 근처 일부 후보만 정밀 계산한 근사 추천이며, 전체 탐색 공간의 전역 최적해를 보장하지 않습니다.";
   return {
@@ -242,11 +263,13 @@ function finishSearch(config: CandidateSearchConfig, prepared: PreparedSearch, c
     rejectedByValidation: prepared.prevalidationRejectedCount + counters.precisionValidationRejectedCount,
     prevalidationRejectedCount: prepared.prevalidationRejectedCount,
     precisionValidationRejectedCount: counters.precisionValidationRejectedCount,
+    massFilteredCount: prepared.massFilteredCount,
     calculationFailures: counters.calculationFailures,
     prefilteredCandidateCount: prepared.geometries.length,
     targetMassNearbyIncluded: prepared.targetMassNearbyIncluded,
     truncated: prepared.truncated,
     warning: prepared.truncated ? config.searchOrder === "target-mass" ? `${partialWarning} ${automaticSummary}` : `후보 조합 ${prepared.totalCombinations.toLocaleString()}개 중 ${counters.evaluatedCombinations.toLocaleString()}개만 계산했으며 전역 최적해를 보장하지 않습니다.` : automaticSummary,
+    diagnosis: automaticDiagnosis,
   };
 }
 

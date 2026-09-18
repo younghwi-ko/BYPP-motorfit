@@ -22,6 +22,8 @@ export {
   createAutomaticCandidateSearchConfig,
   searchCandidates,
   searchCandidatesAsync,
+  MASS_UPPER_EPSILON_KG,
+  isWithinMassUpperBound,
   validateCandidateSearchConfig,
 } from "./candidate-search";
 export { calculateNozzleDesign } from "./nozzle-design";

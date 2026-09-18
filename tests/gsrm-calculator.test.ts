@@ -2,6 +2,18 @@ import { describe, expect, it } from "vitest";
 import { AN_SERIES_CATALOG, DEFAULT_AN_CANDIDATE, calculateGsrmCalculator, evaluateAnCatalog } from "../src/engine";
 
 describe("GSRM Calculator and AS568 catalog", () => {
+  it("includes the complete visible 309-338 catalog tail", () => {
+    expect(AN_SERIES_CATALOG).toHaveLength(241);
+    expect(AN_SERIES_CATALOG.find((item) => item.sizeNo === 337)).toMatchObject({
+      partNumber: "AN-337-NBR", innerDiameterMm: 72.39, crossSectionMm: 5.33,
+      innerDiameterToleranceMm: 0.61, crossSectionToleranceMm: 0.13, material: "NBR", hardness: 70, sourceLabel: "AS 568A O-Ring 규격표 (첨부 이미지)",
+    });
+    expect(AN_SERIES_CATALOG.find((item) => item.sizeNo === 338)).toMatchObject({
+      partNumber: "AN-338-NBR", innerDiameterMm: 78.74, crossSectionMm: 5.33,
+      innerDiameterToleranceMm: 0.61, crossSectionToleranceMm: 0.13, material: "NBR", hardness: 70, sourceLabel: "AS 568A O-Ring 규격표 (첨부 이미지)",
+    });
+  });
+
   it("uses AN-132 as the GSRM baseline while preserving AN-129 mapping", () => {
     expect(DEFAULT_AN_CANDIDATE.partNumber).toBe("AN-132-NBR");
     expect(DEFAULT_AN_CANDIDATE.innerDiameterMm).toBe(44.12);

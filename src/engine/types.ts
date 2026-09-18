@@ -335,11 +335,13 @@ export interface CandidateSearchResult {
   rejectedByValidation: number;
   prevalidationRejectedCount?: number;
   precisionValidationRejectedCount?: number;
+  massFilteredCount?: number;
   calculationFailures: number;
   prefilteredCandidateCount?: number;
   targetMassNearbyIncluded?: boolean;
   truncated: boolean;
   warning?: string;
+  diagnosis?: string;
 }
 
 export interface CandidateSearchProgress {
