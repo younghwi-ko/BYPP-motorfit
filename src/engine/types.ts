@@ -324,3 +324,26 @@ export interface CandidateSearchResult {
   truncated: boolean;
   warning?: string;
 }
+
+export interface NozzleDesignInput {
+  chamberDiameterMm: number;
+  throatDiameterMm: number;
+  actualExitDiameterMm: number;
+  optimalExpansionRatio: number;
+  convergenceHalfAngleDeg: number;
+  divergenceHalfAngleDeg: number;
+}
+
+export interface NozzleProfilePoint {
+  xMm: number;
+  radiusMm: number;
+}
+
+export interface NozzleDesignResult {
+  convergenceLengthMm: number;
+  divergenceLengthMm: number;
+  totalLengthMm: number;
+  actualExitDiameterMm: number;
+  optimalExitDiameterMm: number;
+  profile: readonly NozzleProfilePoint[];
+}

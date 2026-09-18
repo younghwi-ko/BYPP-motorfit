@@ -17,6 +17,43 @@ import type {
 
 const DEFAULT_MAX_CANDIDATES = 2_000;
 
+export class CandidateSearchInputError extends Error {
+  readonly issues: readonly string[];
+  constructor(issues: readonly string[]) {
+    super(`Invalid candidate search input: ${issues.join("; ")}`);
+    this.name = "CandidateSearchInputError";
+    this.issues = issues;
+  }
+}
+
+function validateRange(name: string, range: CandidateNumberRange, issues: string[]) {
+  const step = range.step ?? 5;
+  if (!Number.isFinite(range.min) || !Number.isFinite(range.max) || range.min > range.max) {
+    issues.push(`${name} 범위의 최소·최대값을 확인하세요.`);
+  }
+  if (!Number.isFinite(step) || step <= 0) issues.push(`${name} 간격은 0보다 큰 숫자여야 합니다.`);
+}
+
+export function validateCandidateSearchConfig(config: CandidateSearchConfig): readonly string[] {
+  const issues: string[] = [];
+  const positive = [
+    ["챔버 직경", config.chamberDiameterMm], ["챔버 길이", config.chamberLengthMm],
+    ["목표 연료 질량", config.targetFuelMassKg], ["질량 허용 오차", config.fuelMassToleranceKg],
+    ["최대 허용 압력", config.maximumPressureMpa], ["목표 평균 추력", config.targetAverageThrustN],
+    ["추력 허용 오차", config.averageThrustToleranceN], ["목표 연소 시간", config.targetBurnTimeSec],
+    ["시간 허용 오차", config.burnTimeToleranceSec], ["목표 압력", config.targetPressureMpa],
+  ] as const;
+  for (const [name, value] of positive) if (!Number.isFinite(value) || value <= 0) issues.push(`${name}은 0보다 큰 유한값이어야 합니다.`);
+  validateRange("Do", config.outerDiameterMm, issues);
+  validateRange("do", config.coreDiameterMm, issues);
+  validateRange("Lo", config.segmentLengthMm, issues);
+  if (!Number.isInteger(config.segmentCount.min) || !Number.isInteger(config.segmentCount.max) || config.segmentCount.min < 1 || config.segmentCount.max < config.segmentCount.min) issues.push("세그먼트 수 범위는 양의 정수이며 최소값이 최대값보다 클 수 없습니다.");
+  if (config.manufacturingStepMm !== undefined && (!Number.isInteger(config.manufacturingStepMm) || config.manufacturingStepMm <= 0)) issues.push("제작 간격은 양의 정수 mm여야 합니다.");
+  if (!Number.isFinite(config.densityRatio) || config.densityRatio <= 0) issues.push("밀도비는 0보다 큰 유한값이어야 합니다.");
+  if (!Number.isFinite(config.nozzleErosionMm) || config.nozzleErosionMm < 0) issues.push("노즐 침식량은 0 이상인 유한값이어야 합니다.");
+  return issues;
+}
+
 function rangeValues(range: CandidateNumberRange, fallbackStep: number): number[] {
   const step = range.step ?? fallbackStep;
   if (
@@ -63,6 +100,8 @@ function finiteMetrics(candidate: CandidateResult): boolean {
 }
 
 export function searchCandidates(config: CandidateSearchConfig): CandidateSearchResult {
+  const inputIssues = validateCandidateSearchConfig(config);
+  if (inputIssues.length > 0) throw new CandidateSearchInputError(inputIssues);
   const outerValues = rangeValues(config.outerDiameterMm, 5);
   const coreValues = rangeValues(config.coreDiameterMm, 5);
   const lengthValues = rangeValues(config.segmentLengthMm, 5);

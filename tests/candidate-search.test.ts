@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 
 import {
   estimateCandidateCount,
+  CandidateSearchInputError,
   scoreCandidate,
   searchCandidates,
 } from "../src/engine";
@@ -90,6 +91,13 @@ describe("candidate search", () => {
     expect(result.evaluatedCombinations).toBe(1);
     expect(result.rejectedByValidation).toBe(0);
     expect(result.candidates[0].input.grainOuterDiameterMm).toBe(44.5);
+  });
+
+  it("rejects nonpositive or nonfinite tolerances before calculation", () => {
+    expect(() => searchCandidates({ ...BASE_CONFIG, fuelMassToleranceKg: 0 })).toThrow(CandidateSearchInputError);
+    expect(() => searchCandidates({ ...BASE_CONFIG, averageThrustToleranceN: Number.NaN })).toThrow(CandidateSearchInputError);
+    expect(() => searchCandidates({ ...BASE_CONFIG, outerDiameterMm: { min: 50, max: 45 } })).toThrow(CandidateSearchInputError);
+    expect(() => searchCandidates({ ...BASE_CONFIG, segmentCount: { min: 0, max: 2 } })).toThrow(CandidateSearchInputError);
   });
 });
 

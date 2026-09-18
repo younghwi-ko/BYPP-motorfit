@@ -15,7 +15,13 @@ export {
 export { calculatePerformance } from "./performance";
 export { createMotorOutput } from "./output";
 export { scoreCandidate } from "./candidate-score";
-export { estimateCandidateCount, searchCandidates } from "./candidate-search";
+export {
+  CandidateSearchInputError,
+  estimateCandidateCount,
+  searchCandidates,
+  validateCandidateSearchConfig,
+} from "./candidate-search";
+export { calculateNozzleDesign } from "./nozzle-design";
 export { selectBurnRateCoefficients, BURN_RATE_PRESSURE_BANDS } from "./data/burnrate";
 export { classifyMotor, MOTOR_CLASS_BANDS } from "./data/motor-class";
 export { solveBisection } from "./solvers/bisection";
@@ -43,6 +49,9 @@ export type {
   KnCurvePoint,
   ManufacturingConstraints,
   MotorOutputResult,
+  NozzleDesignInput,
+  NozzleDesignResult,
+  NozzleProfilePoint,
   OutputThrustPoint,
   PerformanceOptions,
   PerformanceResult,
