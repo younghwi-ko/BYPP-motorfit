@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 
 import { AN_SERIES_CATALOG, CandidateSearchCancelledError, CandidateSearchInputError, calculateGsrmReferenceDiameter, createAutomaticCandidateSearchConfig, DEFAULT_GSRM_WALL_THICKNESS_MM, estimateCandidateCount, evaluateAnCatalog, searchCandidatesAsync } from "../engine";
 import type { GsrmBatchResult } from "../engine";
@@ -90,9 +90,9 @@ function RangeField({ label, range, onChange, suffix = "mm", disabled = false, i
 }
 
 function StatusPill({ status, reference = false }: { status: "pass" | "conditional" | "fail"; reference?: boolean }) {
-  if (status === "pass") return <span className="rounded-full bg-emerald-100 px-2.5 py-1 text-xs font-bold text-emerald-700">추천</span>;
-  if (status === "conditional") return <span className="rounded-full bg-cyan-100 px-2.5 py-1 text-xs font-bold text-cyan-700">조건부</span>;
-  return <span className={`rounded-full px-2.5 py-1 text-xs font-bold ${reference ? "bg-violet-100 text-violet-700" : "bg-amber-100 text-amber-700"}`}>{reference ? "참고용 탈락" : "탈락"}</span>;
+  if (status === "pass") return <span role="status" aria-label="추천 후보" className="rounded-full bg-emerald-100 px-2.5 py-1 text-xs font-bold text-emerald-700">추천</span>;
+  if (status === "conditional") return <span role="status" aria-label="조건부 후보" className="rounded-full bg-cyan-100 px-2.5 py-1 text-xs font-bold text-cyan-700">조건부</span>;
+  return <span role="status" aria-label={reference ? "참고용 탈락 후보" : "탈락 후보"} className={`rounded-full px-2.5 py-1 text-xs font-bold ${reference ? "bg-violet-100 text-violet-700" : "bg-amber-100 text-amber-700"}`}>{reference ? "참고용 탈락" : "탈락"}</span>;
 }
 
 type ConditionState = "pass" | "fail" | "unset" | "not-applicable";
@@ -249,7 +249,32 @@ export default function Home() {
   const [completedStage, setCompletedStage] = useState(0);
   const [runningStage, setRunningStage] = useState<number | null>(null);
   const [cancelled, setCancelled] = useState(false);
+  const [statusFilters, setStatusFilters] = useState<Array<"pass" | "conditional" | "fail">>(["pass", "conditional", "fail"]);
+  const [comparison, setComparison] = useState<CandidateResult[]>([]);
+  const [calculatedSignature, setCalculatedSignature] = useState<string | null>(null);
+  const [restoredFromStorage, setRestoredFromStorage] = useState(false);
   const cancelRequested = useRef(false);
+
+  const inputSignature = useMemo(() => JSON.stringify({ config, targetThrustText, mode, automaticMode }), [automaticMode, config, mode, targetThrustText]);
+  useEffect(() => {
+    try {
+      const saved = window.localStorage.getItem("motorfit-input-v1");
+      if (saved) {
+        const parsed = JSON.parse(saved) as { config?: CandidateSearchConfig; targetThrustText?: string; mode?: "candidate" | "excel"; automaticMode?: boolean; calculatedSignature?: string };
+        window.setTimeout(() => {
+          if (parsed.config) setConfig(parsed.config);
+          if (typeof parsed.targetThrustText === "string") setTargetThrustText(parsed.targetThrustText);
+          if (parsed.mode) setMode(parsed.mode);
+          if (typeof parsed.automaticMode === "boolean") setAutomaticMode(parsed.automaticMode);
+          if (parsed.calculatedSignature) setCalculatedSignature(parsed.calculatedSignature);
+          setRestoredFromStorage(true);
+        }, 0);
+      }
+    } catch { /* storage is unavailable; continue with defaults */ }
+  }, []);
+  useEffect(() => {
+    try { window.localStorage.setItem("motorfit-input-v1", JSON.stringify({ config, targetThrustText, mode, automaticMode, calculatedSignature })); } catch { /* storage is best effort */ }
+  }, [automaticMode, calculatedSignature, config, mode, targetThrustText]);
 
   const updateNumber = (key: keyof CandidateSearchConfig, value: number) => setConfig((current) => ({ ...current, [key]: value }));
   const updateRange = (key: "outerDiameterMm" | "coreDiameterMm" | "segmentLengthMm", bound: "min" | "max", value: number) => setConfig((current) => ({ ...current, [key]: { ...current[key], [bound]: value } }));
@@ -270,6 +295,7 @@ export default function Home() {
     setCompletedStage(0);
     setRunningStage(null);
     setCancelled(false);
+    setComparison([]);
   };
   const runSearch = async (stage = 3) => {
     setRunningStage(stage);
@@ -305,6 +331,7 @@ export default function Home() {
       }
       setSearch(result);
       setCompletedStage(stage);
+      setCalculatedSignature(inputSignature);
       setSelected(result.candidates.find((candidate) => candidate.status !== "fail") ?? null);
       setSortKey(null);
       setSortDirection(null);
@@ -322,6 +349,7 @@ export default function Home() {
     }
   };
   const sortedCandidates = useMemo(() => search ? sortCandidates(search.candidates, sortKey, sortDirection) : [], [search, sortDirection, sortKey]);
+  const visibleCandidates = useMemo(() => sortedCandidates.filter((candidate) => statusFilters.includes(candidate.status)), [sortedCandidates, statusFilters]);
   const candidateCounts = useMemo(() => search ? {
     pass: search.candidates.filter((candidate) => candidate.status === "pass").length,
     conditional: search.candidates.filter((candidate) => candidate.status === "conditional").length,
@@ -330,6 +358,15 @@ export default function Home() {
   const closestFailedCandidate = useMemo(() => {
     return search?.nearestRejectedCandidate ?? null;
   }, [search]);
+  const toggleComparison = (candidate: CandidateResult) => setComparison((current) => current.some((item) => item === candidate) ? current.filter((item) => item !== candidate) : current.length >= 3 ? current : [...current, candidate]);
+  const downloadExport = (format: "csv" | "json") => {
+    if (!search) return;
+    const rows = search.candidates.map((candidate) => ({ status: candidate.status, geometry: `${candidate.input.grainOuterDiameterMm}×${candidate.input.grainCoreDiameterMm}×${candidate.input.segmentLengthMm}/${candidate.input.segmentCount}`, massKg: candidate.grainMassKg, maximumPressureMpa: candidate.maximumPressureMpa, burnTimeSec: candidate.burnTimeSec, averageThrustN: candidate.averageThrustN, reasons: candidate.reasons.join(" ") }));
+    const payload = { exportedAt: new Date().toISOString(), input: { ...config, targetThrustText, targetThrustEnabled: targetThrustText.trim() !== "" }, search: { totalCombinations: search.totalCombinations, evaluatedCombinations: search.evaluatedCombinations, automaticExpansionStage: search.automaticExpansionStage ?? 0, searchEnvelope: search.searchEnvelope, warning: search.warning, diagnosis: search.diagnosis }, candidates: rows, selectedCandidates: comparison.map((candidate) => rows[search.candidates.indexOf(candidate)]), referenceCandidate: closestFailedCandidate ? rows[search.candidates.indexOf(closestFailedCandidate)] : null, gsrm: selected ? { referenceDiameterMm: gsrmReferenceDiameterMm, note: "선택 후보의 GSRM B 변환값. AN 검사는 화면에서 실행한 결과를 기준으로 합니다." } : null, an: { catalogSize: 241, query: "현재 화면 검색어", page: "현재 화면 페이지" } };
+    const text = format === "json" ? JSON.stringify(payload, null, 2) : ["status,geometry,massKg,maximumPressureMpa,burnTimeSec,averageThrustN,reasons", ...rows.map((row) => [row.status, row.geometry, row.massKg, row.maximumPressureMpa, row.burnTimeSec, row.averageThrustN, JSON.stringify(row.reasons)].join(","))].join("\n");
+    const blob = new Blob([text], { type: format === "json" ? "application/json" : "text/csv;charset=utf-8" });
+    const url = URL.createObjectURL(blob); const anchor = document.createElement("a"); anchor.href = url; anchor.download = `motorfit-results.${format}`; anchor.click(); URL.revokeObjectURL(url);
+  };
   const toggleSort = (key: CandidateSortKey) => {
     if (sortKey !== key) {
       setSortKey(key);
@@ -521,6 +558,8 @@ export default function Home() {
 </div>
 </div> : <div className="space-y-6">
 <div className="rounded-3xl border border-cyan-200 bg-gradient-to-br from-cyan-50 to-white p-4 shadow-sm sm:p-5"><div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between"><div><p className="text-xs font-bold uppercase tracking-[0.14em] text-cyan-700">현재 계산 요약</p><h2 className="mt-1 text-lg font-bold text-slate-950">목표와 탐색 상태를 한눈에 확인하세요</h2></div><span className="rounded-full bg-slate-900 px-3 py-1 text-xs font-bold text-white">UI 단계 {completedStage}/3</span></div><div className="mt-4 grid grid-cols-2 gap-2 sm:grid-cols-4"><div className="rounded-2xl bg-white px-3 py-3 shadow-sm"><p className="text-[11px] font-semibold text-slate-500">목표 질량</p><p className="mt-1 text-base font-bold text-slate-950">{formatNumber(config.targetFuelMassKg, 4)} <span className="text-xs font-normal text-slate-500">kg</span></p></div><div className="rounded-2xl bg-white px-3 py-3 shadow-sm"><p className="text-[11px] font-semibold text-slate-500">최대 허용 압력</p><p className="mt-1 text-base font-bold text-slate-950">{formatNumber(config.maximumPressureMpa, 3)} <span className="text-xs font-normal text-slate-500">MPa</span></p></div><div className="rounded-2xl bg-white px-3 py-3 shadow-sm"><p className="text-[11px] font-semibold text-slate-500">목표 평균 추력</p><p className="mt-1 text-base font-bold text-slate-950">{targetThrustText.trim() === "" ? "미입력" : `${formatNumber(Number(targetThrustText), 2)} N`}</p></div><div className="rounded-2xl bg-white px-3 py-3 shadow-sm"><p className="text-[11px] font-semibold text-slate-500">자동 확장 단계</p><p className="mt-1 text-base font-bold text-violet-700">{search ? `${search.automaticExpansionStage ?? 0}단계` : "대기"}</p></div></div><p className="mt-3 text-[11px] text-slate-600">UI 입력 단계는 질량 → 압력 → 최종 추천의 완료 상태이고, 자동 확장 단계는 탐색 범위 확장 횟수입니다.</p></div>
+{restoredFromStorage && !search ? <div className="rounded-2xl border border-sky-200 bg-sky-50 px-4 py-3 text-xs text-sky-900" role="status">저장된 입력값을 복원했습니다. 마지막 계산 결과는 현재 화면에 없으므로 다시 계산해 주세요.</div> : null}
+{search && calculatedSignature !== inputSignature ? <div className="rounded-2xl border-2 border-amber-300 bg-amber-50 px-4 py-3 text-xs text-amber-950" role="alert"><strong>재계산 필요</strong> · 입력값이 마지막 계산 결과와 달라졌습니다.</div> : null}
 <div className="flex flex-col gap-3 rounded-2xl border border-slate-200 bg-white px-5 py-4 shadow-sm sm:flex-row sm:items-center sm:justify-between">
 <div>
 <p className="text-sm font-bold text-slate-950">탐색 결과</p>
@@ -542,6 +581,8 @@ export default function Home() {
 <p className="mt-1">{SCORE_GUIDANCE}</p>
 <p className="mt-1 text-slate-500">질량 오차와 압력 제한을 기본으로 평가하고, 목표 추력 입력 시 추력 곡선 오차를 추가합니다.</p>
 </div>
+<div className="rounded-2xl border border-cyan-100 bg-cyan-50/50 px-4 py-3"><div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between"><div><p className="font-bold text-slate-900">후보 필터·비교·내보내기</p><p className="mt-1 text-[11px] text-slate-600">상태 필터를 선택하고 후보 행의 비교 버튼으로 최대 3개까지 비교하세요.</p></div><div className="flex flex-wrap gap-2" role="group" aria-label="후보 상태 필터">{([['pass','추천'],['conditional','조건부'],['fail','탈락']] as const).map(([value,label]) => <label key={value} className="flex items-center gap-1 rounded-lg bg-white px-2 py-1.5 text-xs"><input type="checkbox" checked={statusFilters.includes(value)} onChange={() => setStatusFilters((current) => current.includes(value) ? current.filter((item) => item !== value) : [...current, value])} />{label}</label>)}</div><div className="flex gap-2"><button type="button" onClick={() => downloadExport("csv")} className="rounded-lg border border-cyan-300 bg-white px-3 py-1.5 text-xs font-bold text-cyan-800 focus:outline-none focus:ring-2 focus:ring-cyan-500">CSV 내보내기</button><button type="button" onClick={() => downloadExport("json")} className="rounded-lg bg-cyan-700 px-3 py-1.5 text-xs font-bold text-white focus:outline-none focus:ring-2 focus:ring-cyan-500">JSON 내보내기</button></div></div><p className="mt-2 text-[11px] text-slate-600">현재 표시 후보 {visibleCandidates.length.toLocaleString()}개 · 비교 {comparison.length}/3</p></div>
+{comparison.length > 0 ? <div className="rounded-2xl border border-cyan-200 bg-white p-3"><p className="text-xs font-bold text-slate-900">선택 후보 비교 ({comparison.length}/3)</p><div className="mt-2 grid gap-2 sm:grid-cols-3">{comparison.map((candidate) => <div key={`${candidate.input.grainOuterDiameterMm}-${candidate.input.grainCoreDiameterMm}-${candidate.input.segmentLengthMm}-${candidate.input.segmentCount}`} className="rounded-xl border border-slate-200 p-3 text-[11px]"><div className="flex items-center justify-between gap-2"><strong>{candidate.input.grainOuterDiameterMm}×{candidate.input.grainCoreDiameterMm}×{candidate.input.segmentLengthMm}/{candidate.input.segmentCount}</strong><StatusPill status={candidate.status} /></div><p className="mt-2">질량 {formatNumber(candidate.grainMassKg,4)} kg</p><p>압력 {formatNumber(candidate.maximumPressureMpa,4)} MPa</p><p>연소 {formatNumber(candidate.burnTimeSec,4)} s</p><p>추력 {formatNumber(candidate.averageThrustN,2)} N</p><p className="mt-1 text-slate-500">{candidate.reasons.join(" ") || "조건 충족"}</p></div>)}</div></div> : null}
 <div className="overflow-hidden rounded-3xl border border-slate-200 bg-white shadow-sm">
 <div className="hidden overflow-x-auto sm:block">
 <table className="w-full min-w-[900px] text-left text-xs">
@@ -554,9 +595,10 @@ export default function Home() {
 <SortHeader label="연소시간" sortKey="burnTime" activeKey={sortKey} direction={sortDirection} onSort={toggleSort} />
 <SortHeader label="평균추력" sortKey="averageThrust" activeKey={sortKey} direction={sortDirection} onSort={toggleSort} />
 <SortHeader label="점수" sortKey="score" activeKey={sortKey} direction={sortDirection} onSort={toggleSort} />
+<th className="px-4 py-3">비교</th>
 </tr>
 </thead>
-<tbody className="divide-y divide-slate-100">{sortedCandidates.slice(0, 12).map((candidate) => <tr key={`${candidate.input.grainOuterDiameterMm}-${candidate.input.grainCoreDiameterMm}-${candidate.input.segmentLengthMm}-${candidate.input.segmentCount}`} onClick={() => { if (candidate.status !== "fail") setSelected(candidate); }} className={`transition ${candidate.status !== "fail" ? "cursor-pointer hover:bg-cyan-50" : "cursor-default opacity-75"} ${selected === candidate ? "bg-cyan-50" : ""}`}>
+<tbody className="divide-y divide-slate-100">{visibleCandidates.slice(0, 12).map((candidate) => <tr key={`${candidate.input.grainOuterDiameterMm}-${candidate.input.grainCoreDiameterMm}-${candidate.input.segmentLengthMm}-${candidate.input.segmentCount}`} onClick={() => { if (candidate.status !== "fail") setSelected(candidate); }} className={`transition ${candidate.status !== "fail" ? "cursor-pointer hover:bg-cyan-50" : "cursor-default opacity-75"} ${selected === candidate ? "bg-cyan-50" : ""}`}>
 <td className="px-4 py-3">
 <StatusPill status={candidate.status} reference={candidate === search.nearestRejectedCandidate} />
 </td>
@@ -566,10 +608,11 @@ export default function Home() {
 <td className="px-4 py-3 text-slate-600">{formatNumber(candidate.burnTimeSec, 4)} s</td>
 <td className="px-4 py-3 text-slate-600">{formatNumber(candidate.averageThrustN, 2)} N</td>
 <td className="px-4 py-3 font-bold text-cyan-700">{formatNumber(candidate.score.totalScore, 1)}</td>
+<td className="px-4 py-3"><button type="button" aria-label="비교 후보 선택" onClick={(event) => { event.stopPropagation(); toggleComparison(candidate); }} className="rounded-lg border border-cyan-300 px-2 py-1 text-[11px] font-bold text-cyan-800 focus:outline-none focus:ring-2 focus:ring-cyan-500">{comparison.some((item) => item === candidate) ? "해제" : "비교"}</button></td>
 </tr>)}</tbody>
 </table>
 </div>
-<div className="divide-y divide-slate-100 sm:hidden">{sortedCandidates.slice(0, 8).map((candidate) => <button type="button" key={`${candidate.input.grainOuterDiameterMm}-${candidate.input.grainCoreDiameterMm}-${candidate.input.segmentLengthMm}-${candidate.input.segmentCount}`} disabled={candidate.status === "fail"} onClick={() => setSelected(candidate)} className={`block w-full p-4 text-left ${candidate.status === "fail" ? "opacity-75" : "active:bg-cyan-50"}`}><div className="flex items-center justify-between gap-3"><StatusPill status={candidate.status} reference={candidate === search.nearestRejectedCandidate} /><span className="font-bold text-slate-800">{candidate.input.grainOuterDiameterMm} × {candidate.input.grainCoreDiameterMm} × {candidate.input.segmentLengthMm} / {candidate.input.segmentCount}</span></div><div className="mt-2 grid grid-cols-3 gap-2 text-[11px] text-slate-500"><span>질량<br /><strong className="text-slate-800">{formatNumber(candidate.grainMassKg, 4)} kg</strong></span><span>최대압력<br /><strong className="text-slate-800">{formatNumber(candidate.maximumPressureMpa, 3)} MPa</strong></span><span>평균추력<br /><strong className="text-slate-800">{formatNumber(candidate.averageThrustN, 1)} N</strong></span></div></button>)}</div>
+<div className="divide-y divide-slate-100 sm:hidden">{visibleCandidates.slice(0, 8).map((candidate) => <div key={`${candidate.input.grainOuterDiameterMm}-${candidate.input.grainCoreDiameterMm}-${candidate.input.segmentLengthMm}-${candidate.input.segmentCount}`} className={`w-full p-4 ${candidate.status === "fail" ? "opacity-75" : ""}`}><button type="button" disabled={candidate.status === "fail"} onClick={() => setSelected(candidate)} className="block w-full text-left focus:outline-none focus:ring-2 focus:ring-cyan-500"><div className="flex items-center justify-between gap-3"><StatusPill status={candidate.status} reference={candidate === search.nearestRejectedCandidate} /><span className="font-bold text-slate-800">{candidate.input.grainOuterDiameterMm} × {candidate.input.grainCoreDiameterMm} × {candidate.input.segmentLengthMm} / {candidate.input.segmentCount}</span></div><div className="mt-2 grid grid-cols-3 gap-2 text-[11px] text-slate-500"><span>질량<br /><strong className="text-slate-800">{formatNumber(candidate.grainMassKg, 4)} kg</strong></span><span>최대압력<br /><strong className="text-slate-800">{formatNumber(candidate.maximumPressureMpa, 3)} MPa</strong></span><span>평균추력<br /><strong className="text-slate-800">{formatNumber(candidate.averageThrustN, 1)} N</strong></span></div></button><button type="button" onClick={() => toggleComparison(candidate)} className="mt-2 rounded-lg border border-cyan-300 px-2 py-1 text-[11px] font-bold text-cyan-800 focus:outline-none focus:ring-2 focus:ring-cyan-500">{comparison.some((item) => item === candidate) ? "비교 해제" : "비교에 추가"}</button></div>)}</div>
 </div>{selected ? <div className="space-y-6">
 <div className="flex items-center justify-between">
 <div>
