@@ -22,6 +22,10 @@ export {
   validateCandidateSearchConfig,
 } from "./candidate-search";
 export { calculateNozzleDesign } from "./nozzle-design";
+export {
+  calculateGsrmReferenceDiameter,
+  DEFAULT_GSRM_WALL_THICKNESS_MM,
+} from "./gsrm-oring";
 export { selectBurnRateCoefficients, BURN_RATE_PRESSURE_BANDS } from "./data/burnrate";
 export { classifyMotor, MOTOR_CLASS_BANDS } from "./data/motor-class";
 export { solveBisection } from "./solvers/bisection";
