@@ -342,6 +342,15 @@ export interface CandidateSearchResult {
   truncated: boolean;
   warning?: string;
   diagnosis?: string;
+  automaticExpansionStage?: number;
+  searchEnvelope?: {
+    chamberDiameterMm: number;
+    chamberLengthMm: number;
+    outerDiameterMm: CandidateNumberRange;
+    coreDiameterMm: CandidateNumberRange;
+    segmentLengthMm: CandidateNumberRange;
+    segmentCount: CandidateNumberRange;
+  };
 }
 
 export interface CandidateSearchProgress {

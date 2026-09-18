@@ -23,9 +23,10 @@ export function scoreCandidate(
     config.fuelMassToleranceKg;
   const pressureMarginNormalized =
     metrics.maximumPressureMpa / config.maximumPressureMpa;
-  const averageThrustErrorNormalized =
-    Math.abs(metrics.performance.averageThrustN - config.targetAverageThrustN) /
-    config.averageThrustToleranceN;
+  const averageThrustErrorNormalized = config.targetThrustEnabled === false
+    ? 0
+    : Math.abs(metrics.performance.averageThrustN - config.targetAverageThrustN) /
+      config.averageThrustToleranceN;
   const burnTimeErrorNormalized =
     Math.abs(metrics.burnTimeSec - config.targetBurnTimeSec) /
     config.burnTimeToleranceSec;

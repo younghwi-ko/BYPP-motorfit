@@ -152,7 +152,13 @@ function RecommendationRow({ label, value, tone = "slate" }: { label: string; va
 function AnCatalogPanel({ referenceDiameterMm }: { referenceDiameterMm: number }) {
   const [results, setResults] = useState<GsrmBatchResult[] | null>(null);
   const [running, setRunning] = useState(false);
+  const [query, setQuery] = useState("");
+  const [page, setPage] = useState(0);
   const run = () => { setRunning(true); window.setTimeout(() => { try { setResults(evaluateAnCatalog(referenceDiameterMm, AN_SERIES_CATALOG)); } finally { setRunning(false); } }, 0); };
+  const filtered = results?.filter((row) => row.partNumber.toLowerCase().includes(query.trim().toLowerCase())) ?? [];
+  const pageSize = 20;
+  const pageCount = Math.max(1, Math.ceil(filtered.length / pageSize));
+  const pageRows = filtered.slice(page * pageSize, (page + 1) * pageSize);
   return <div className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm">
 <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
 <div>
@@ -161,11 +167,12 @@ function AnCatalogPanel({ referenceDiameterMm }: { referenceDiameterMm: number }
 </div>
 <button type="button" onClick={run} disabled={running} className="rounded-xl bg-violet-600 px-4 py-2.5 text-sm font-bold text-white transition hover:bg-violet-700 disabled:cursor-wait disabled:opacity-60">{running ? "검사 중…" : "AN 시리즈 전체 검사"}</button>
 </div>{results ? <div className="mt-4">
-<div className="grid gap-2 text-xs sm:grid-cols-3">
+<div className="grid gap-2 text-xs sm:grid-cols-4">
 <div className="rounded-xl bg-slate-50 px-3 py-2">검사 {results.length}개</div>
 <div className="rounded-xl bg-emerald-50 px-3 py-2 text-emerald-800">GSRM 기준 추천 {results.filter((r) => r.calculation.check.status === "recommend").length}개</div>
-<div className="rounded-xl bg-amber-50 px-3 py-2 text-amber-800">추가 검토 {results.filter((r) => r.calculation.check.status !== "recommend").length}개</div>
+<div className="rounded-xl bg-cyan-50 px-3 py-2 text-cyan-800">조건부 {results.filter((r) => r.calculation.check.status === "conditional").length}개</div><div className="rounded-xl bg-amber-50 px-3 py-2 text-amber-800">GSRM 기준 탈락 {results.filter((r) => r.calculation.check.status === "fail").length}개</div>
 </div>
+<div className="mt-3 flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between"><input type="search" value={query} onChange={(event) => { setQuery(event.target.value); setPage(0); }} placeholder="형번 검색 (예: AN-337-NBR)" aria-label="AN 형번 검색" className="w-full rounded-xl border border-slate-200 px-3 py-2 text-xs sm:w-64" /><p className="text-[11px] text-slate-500">판정 합계 {results.length}개 · {page + 1}/{pageCount}쪽</p></div>
 <div className="mt-3 overflow-x-auto">
 <table className="w-full min-w-[760px] text-left text-xs">
 <thead className="bg-slate-50 text-[11px] text-slate-500">
@@ -174,24 +181,31 @@ function AnCatalogPanel({ referenceDiameterMm }: { referenceDiameterMm: number }
 <th className="px-3 py-2">ID</th>
 <th className="px-3 py-2">T</th>
 <th className="px-3 py-2">OD</th>
+<th className="px-3 py-2">신장률</th>
+<th className="px-3 py-2">압축량</th>
 <th className="px-3 py-2">압축률</th>
 <th className="px-3 py-2">홈 충전율</th>
+<th className="px-3 py-2">백업 링</th>
 <th className="px-3 py-2">판정</th>
 <th className="px-3 py-2">이유</th>
 </tr>
 </thead>
-<tbody className="divide-y divide-slate-100">{results.slice(0, 20).map((row) => <tr key={row.partNumber} className={row.sizeNo === 132 ? "bg-cyan-50" : undefined}>
+<tbody className="divide-y divide-slate-100">{pageRows.map((row) => <tr key={row.partNumber} className={row.sizeNo === 132 ? "bg-cyan-50" : undefined}>
 <td className="px-3 py-2 font-semibold">{row.partNumber}{row.sizeNo === 132 ? " · GSRM 기준" : ""}</td>
 <td className="px-3 py-2">{row.innerDiameterMm.toFixed(2)} mm</td>
 <td className="px-3 py-2">{row.crossSectionMm.toFixed(2)} mm</td>
 <td className="px-3 py-2">{row.calculation.outsideDiameterMm.toFixed(2)} mm</td>
+<td className="px-3 py-2">{row.calculation.stretchPercent.toFixed(2)}%</td>
+<td className="px-3 py-2">{row.calculation.compressionMm.toFixed(2)} mm</td>
 <td className="px-3 py-2">{row.calculation.compressionPercent.toFixed(1)}%</td>
 <td className="px-3 py-2">{row.calculation.grooveFillPercent.toFixed(1)}%</td>
+<td className="px-3 py-2">{row.calculation.backupRingRequired ? "검토 필요" : "불필요"}</td>
 <td className="px-3 py-2 font-bold">{row.calculation.check.status === "recommend" ? "GSRM 기준 추천" : row.calculation.check.status === "conditional" ? "조건부 추천" : "GSRM 기준 탈락"}</td>
 <td className="px-3 py-2 text-slate-500">{row.calculation.check.reasons.join(", ") || "기하학적 조건 통과"}</td>
 </tr>)}</tbody>
 </table>
 </div>
+<div className="mt-3 flex items-center justify-between"><button type="button" disabled={page === 0} onClick={() => setPage((value) => Math.max(0, value - 1))} className="rounded-lg border border-slate-200 px-3 py-1.5 text-xs disabled:opacity-40">이전</button><button type="button" disabled={page + 1 >= pageCount} onClick={() => setPage((value) => Math.min(pageCount - 1, value + 1))} className="rounded-lg border border-slate-200 px-3 py-1.5 text-xs disabled:opacity-40">다음</button></div>
 <p className="mt-3 text-[11px] leading-5 text-slate-500">본 결과는 SRM 계산 결과와 GSRM Calculator의 기하학적 Engineering Check를 기반으로 한 교육 및 설계 검토 결과입니다. 실제 압력·온도·재질·조립 조건에 대한 최종 적합성을 보증하지 않습니다.</p>
 </div> : <p className="mt-3 text-xs text-slate-500">버튼을 눌러 선택된 SRM 후보의 GSRM 기준 직경으로 전체 규격을 검사하세요.</p>}</div>;
 }
@@ -212,6 +226,7 @@ export default function Home() {
   const [detailsOpen, setDetailsOpen] = useState(false);
   const [progressText, setProgressText] = useState("");
   const [progressPercent, setProgressPercent] = useState(0);
+  const [completedStage, setCompletedStage] = useState(0);
   const cancelRequested = useRef(false);
 
   const updateNumber = (key: keyof CandidateSearchConfig, value: number) => setConfig((current) => ({ ...current, [key]: value }));
@@ -230,9 +245,13 @@ export default function Home() {
     setGsrmWallThicknessMm(DEFAULT_GSRM_WALL_THICKNESS_MM);
     setProgressText("");
     setProgressPercent(0);
+    setCompletedStage(0);
   };
-  const runSearch = async () => {
+  const runSearch = async (stage = 3) => {
+    setCompletedStage(stage);
     cancelRequested.current = false;
+    setSearch(null);
+    setSelected(null);
     const parsedTargetThrust = Number(targetThrustText);
     const targetThrustEnabled = targetThrustText.trim() !== "";
     const baseConfig: CandidateSearchConfig = { ...config, targetAverageThrustN: targetThrustEnabled ? parsedTargetThrust : config.targetAverageThrustN, targetThrustEnabled, mode, burnTimeFilterEnabled: automaticMode ? false : config.burnTimeFilterEnabled };
@@ -257,7 +276,7 @@ export default function Home() {
       });
       if (cancelRequested.current) return;
       setSearch(result);
-      setSelected(result.candidates[0] ?? null);
+      setSelected(result.candidates.find((candidate) => candidate.status !== "fail") ?? null);
       setSortKey(null);
       setSortDirection(null);
     } catch (error) {
@@ -273,6 +292,19 @@ export default function Home() {
     }
   };
   const sortedCandidates = useMemo(() => search ? sortCandidates(search.candidates, sortKey, sortDirection) : [], [search, sortDirection, sortKey]);
+  const closestFailedCandidate = useMemo(() => {
+    if (!search) return null;
+    return search.candidates.filter((candidate) => candidate.status === "fail").reduce<CandidateResult | null>((closest, candidate) => {
+      if (!closest) return candidate;
+      const candidateMassOver = candidate.grainMassKg > config.targetFuelMassKg ? 1 : 0;
+      const closestMassOver = closest.grainMassKg > config.targetFuelMassKg ? 1 : 0;
+      if (candidateMassOver !== closestMassOver) return candidateMassOver < closestMassOver ? candidate : closest;
+      const candidatePressureOver = candidate.maximumPressureMpa > config.maximumPressureMpa ? 1 : 0;
+      const closestPressureOver = closest.maximumPressureMpa > config.maximumPressureMpa ? 1 : 0;
+      if (candidatePressureOver !== closestPressureOver) return candidatePressureOver < closestPressureOver ? candidate : closest;
+      return Math.abs(candidate.grainMassKg - config.targetFuelMassKg) < Math.abs(closest.grainMassKg - config.targetFuelMassKg) ? candidate : closest;
+    }, null);
+  }, [config.maximumPressureMpa, config.targetFuelMassKg, search]);
   const toggleSort = (key: CandidateSortKey) => {
     if (sortKey !== key) {
       setSortKey(key);
@@ -328,11 +360,11 @@ export default function Home() {
     return {
       massError: selected.grainMassKg - config.targetFuelMassKg,
       pressureMargin: config.maximumPressureMpa - selected.maximumPressureMpa,
-      thrustError: selected.averageThrustN - config.targetAverageThrustN,
+      thrustError: targetThrustText.trim() === "" ? null : selected.averageThrustN - Number(targetThrustText),
       burnTimeError: selected.burnTimeSec - config.targetBurnTimeSec,
       dimensionsOnStep,
     };
-  }, [config, selected]);
+  }, [config, selected, targetThrustText]);
   const gsrmReferenceDiameterMm = selected ? calculateGsrmReferenceDiameter(selected.input.chamberDiameterMm, gsrmWallThicknessMm) : null;
 
   return (
@@ -391,9 +423,9 @@ export default function Home() {
 <div className="rounded-2xl border border-cyan-100 bg-cyan-50/60 p-4">
 <p className="text-sm font-bold text-slate-950">단계형 자동 추천</p>
 <div className="mt-3 space-y-4">
-<div><p className="mb-2 text-xs font-bold text-cyan-800">1단계 · 목표 연료 질량</p><Field label="목표 연료 질량" value={config.targetFuelMassKg} onChange={(value) => updateNumber("targetFuelMassKg", value)} suffix="kg" /><button type="button" onClick={runSearch} disabled={running} className="mt-2 w-full rounded-lg bg-cyan-600 px-3 py-2 text-xs font-bold text-white disabled:opacity-60">질량 기준 계산</button></div>
-<div><p className="mb-2 text-xs font-bold text-cyan-800">2단계 · 최대 허용 압력</p><Field label="최대 허용 압력" value={config.maximumPressureMpa} onChange={(value) => updateNumber("maximumPressureMpa", value)} suffix="MPa" /><button type="button" onClick={runSearch} disabled={running} className="mt-2 w-full rounded-lg border border-cyan-300 bg-white px-3 py-2 text-xs font-bold text-cyan-800 disabled:opacity-60">압력 조건 적용</button></div>
-<div><p className="mb-2 text-xs font-bold text-cyan-800">3단계 · 목표 평균 추력</p><OptionalField label="목표 평균 추력" value={targetThrustText} onChange={setTargetThrustText} suffix="N" /><p className="mt-1 text-[11px] leading-5 text-slate-500">{targetThrustText.trim() === "" ? "목표 추력이 입력되지 않아 질량과 압력 중심으로 추천합니다." : "추력 곡선과 목표 추력선의 오차를 함께 평가합니다."}</p><button type="button" onClick={runSearch} disabled={running} className="mt-2 w-full rounded-lg border border-cyan-300 bg-white px-3 py-2 text-xs font-bold text-cyan-800 disabled:opacity-60">최종 추천 계산</button></div>
+<div><p className="mb-2 text-xs font-bold text-cyan-800">1단계 · 목표 연료 질량</p><Field label="목표 연료 질량" value={config.targetFuelMassKg} onChange={(value) => updateNumber("targetFuelMassKg", value)} suffix="kg" /><button type="button" onClick={() => runSearch(1)} disabled={running} className="mt-2 w-full rounded-lg bg-cyan-600 px-3 py-2 text-xs font-bold text-white disabled:opacity-60">질량 기준 계산</button></div>
+<div><p className="mb-2 text-xs font-bold text-cyan-800">2단계 · 최대 허용 압력</p><Field label="최대 허용 압력" value={config.maximumPressureMpa} onChange={(value) => updateNumber("maximumPressureMpa", value)} suffix="MPa" /><button type="button" onClick={() => runSearch(2)} disabled={running} className="mt-2 w-full rounded-lg border border-cyan-300 bg-white px-3 py-2 text-xs font-bold text-cyan-800 disabled:opacity-60">압력 조건 적용</button></div>
+<div><p className="mb-2 text-xs font-bold text-cyan-800">3단계 · 목표 평균 추력</p><OptionalField label="목표 평균 추력" value={targetThrustText} onChange={setTargetThrustText} suffix="N" /><p className="mt-1 text-[11px] leading-5 text-slate-500">{targetThrustText.trim() === "" ? "목표 추력이 입력되지 않아 질량과 압력 중심으로 추천합니다." : "추력 곡선과 목표 추력선의 오차를 함께 평가합니다."}</p><button type="button" onClick={() => runSearch(3)} disabled={running} className="mt-2 w-full rounded-lg border border-cyan-300 bg-white px-3 py-2 text-xs font-bold text-cyan-800 disabled:opacity-60">최종 추천 계산</button></div>
 </div>
 <div className="mt-4">
 <label className="block">
@@ -449,7 +481,7 @@ export default function Home() {
 </div>
           </div>
 </div>
-<button type="button" onClick={runSearch} disabled={running} className={`${automaticMode && mode !== "excel" ? "hidden" : "mt-6"} w-full rounded-xl bg-cyan-600 px-4 py-3 text-sm font-bold text-white shadow-lg shadow-cyan-600/20 transition hover:bg-cyan-700 disabled:cursor-wait disabled:opacity-60`}>{running ? "계산 중…" : mode === "excel" ? "Excel 재현 계산" : "상세 후보 탐색 실행"}</button>
+<button type="button" onClick={() => runSearch(3)} disabled={running} className={`${automaticMode && mode !== "excel" ? "hidden" : "mt-6"} w-full rounded-xl bg-cyan-600 px-4 py-3 text-sm font-bold text-white shadow-lg shadow-cyan-600/20 transition hover:bg-cyan-700 disabled:cursor-wait disabled:opacity-60`}>{running ? "계산 중…" : mode === "excel" ? "Excel 재현 계산" : "상세 후보 탐색 실행"}</button>
 {running ? <div className="mt-3 rounded-xl border border-cyan-100 bg-cyan-50 px-3 py-2 text-xs text-cyan-900"><div className="h-1.5 overflow-hidden rounded-full bg-cyan-100"><div className="h-full rounded-full bg-cyan-500 transition-[width]" style={{ width: `${progressPercent}%` }} /></div><div className="mt-2 flex items-center justify-between gap-2"><span>{progressText}</span><button type="button" onClick={() => { cancelRequested.current = true; setProgressText("계산 취소 요청 중…"); }} className="rounded-lg border border-cyan-300 bg-white px-2 py-1 font-bold">계산 취소</button></div></div> : null}
 <p className="mt-3 text-center text-[11px] text-slate-400">계산은 버튼을 누를 때 브라우저에서 실행됩니다.</p>
         </aside>
@@ -467,6 +499,7 @@ export default function Home() {
 <div>
 <p className="text-sm font-bold text-slate-950">탐색 결과</p>
 <p className="mt-1 text-xs text-slate-500">전체 {search.totalCombinations.toLocaleString()}개 · 정밀 계산 전 형상 제외 {(search.prevalidationRejectedCount ?? search.rejectedByValidation).toLocaleString()}개 · 질량 상한 제외 {(search.massFilteredCount ?? 0).toLocaleString()}개 · 질량 계산 {(search.prefilteredCandidateCount ?? search.totalCombinations).toLocaleString()}개 · 정밀 계산 {search.evaluatedCombinations.toLocaleString()}개 · 정밀 검증 탈락 {(search.precisionValidationRejectedCount ?? 0).toLocaleString()}개 · 추천 {search.candidates.filter((candidate) => candidate.status === "pass").length}개 · 조건부 {search.candidates.filter((candidate) => candidate.status === "conditional").length}개 · 탈락 {search.candidates.filter((candidate) => candidate.status === "fail").length}개 · 계산 실패 {search.calculationFailures.toLocaleString()}개</p>
+<p className="mt-1 text-[11px] text-slate-500">단계 {completedStage}/3 완료 · 자동 확장 {search.automaticExpansionStage ?? 0}단계 · 현재 범위 {search.searchEnvelope ? `챔버 ${search.searchEnvelope.chamberDiameterMm}×${search.searchEnvelope.chamberLengthMm} mm, Do ${search.searchEnvelope.outerDiameterMm.min}~${search.searchEnvelope.outerDiameterMm.max}, do ${search.searchEnvelope.coreDiameterMm.min}~${search.searchEnvelope.coreDiameterMm.max}, Lo ${search.searchEnvelope.segmentLengthMm.min}~${search.searchEnvelope.segmentLengthMm.max}, 세그먼트 ${search.searchEnvelope.segmentCount.min}~${search.searchEnvelope.segmentCount.max}` : "상세 설정 범위"}</p>
 </div>
 <div className="flex gap-2 text-xs">
 <span className="rounded-full bg-emerald-100 px-2.5 py-1 font-bold text-emerald-700">추천 {search.candidates.filter((candidate) => candidate.status === "pass").length}</span>
@@ -474,9 +507,10 @@ export default function Home() {
 <span className="rounded-full bg-slate-100 px-2.5 py-1 font-bold text-slate-600">탈락 {search.candidates.filter((candidate) => candidate.status === "fail").length}</span>
 </div>
 </div>{search.warning ? <div className="rounded-2xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-800">⚠ {search.warning}</div> : null}{search.candidates.length === 0 ? <div className="rounded-2xl border border-amber-200 bg-amber-50 px-4 py-4 text-sm leading-6 text-amber-900">
-<p className="font-bold">{search.diagnosis === "목표 질량 이하 후보를 찾지 못했습니다." ? "목표 질량 이하 후보를 찾지 못했습니다." : "조건을 만족한 후보가 없습니다."}</p>
+<p className="font-bold">{search.diagnosis ?? "조건을 만족한 후보가 없습니다."}</p>
 <p className="mt-1">자동 탐색 범위, 질량 오차, 압력 제한과 목표 추력 조건을 확인하고 상세 설정에서 허용 오차를 조정해보세요.</p>
 </div> : null}<div className="rounded-2xl border border-slate-200 bg-white px-4 py-3 text-xs leading-5 text-slate-600">
+{search.candidates.length > 0 && !search.candidates.some((candidate) => candidate.status !== "fail") ? <div className="mb-3 rounded-xl border border-amber-200 bg-amber-50 px-3 py-3 text-amber-900"><p className="font-bold">유효한 추천·조건부 후보가 없습니다.</p><p className="mt-1">탈락 후보는 참고용으로만 표시하며, 추천 후보로 선택하지 않습니다.</p>{closestFailedCandidate ? <p className="mt-2 font-semibold">가장 가까운 탈락 후보: Do {closestFailedCandidate.input.grainOuterDiameterMm} × do {closestFailedCandidate.input.grainCoreDiameterMm} × Lo {closestFailedCandidate.input.segmentLengthMm} / {closestFailedCandidate.input.segmentCount} · {formatNumber(closestFailedCandidate.grainMassKg, 4)} kg · {closestFailedCandidate.reasons.join(" ")}</p> : null}</div> : null}
 <p className="font-bold text-slate-900">점수 기준 안내</p>
 <p className="mt-1">{SCORE_GUIDANCE}</p>
 <p className="mt-1 text-slate-500">질량 오차와 압력 제한을 기본으로 평가하고, 목표 추력 입력 시 추력 곡선 오차를 추가합니다.</p>
@@ -495,7 +529,7 @@ export default function Home() {
 <SortHeader label="점수" sortKey="score" activeKey={sortKey} direction={sortDirection} onSort={toggleSort} />
 </tr>
 </thead>
-<tbody className="divide-y divide-slate-100">{sortedCandidates.slice(0, 12).map((candidate) => <tr key={`${candidate.input.grainOuterDiameterMm}-${candidate.input.grainCoreDiameterMm}-${candidate.input.segmentLengthMm}-${candidate.input.segmentCount}`} onClick={() => setSelected(candidate)} className={`cursor-pointer transition hover:bg-cyan-50 ${selected === candidate ? "bg-cyan-50" : ""}`}>
+<tbody className="divide-y divide-slate-100">{sortedCandidates.slice(0, 12).map((candidate) => <tr key={`${candidate.input.grainOuterDiameterMm}-${candidate.input.grainCoreDiameterMm}-${candidate.input.segmentLengthMm}-${candidate.input.segmentCount}`} onClick={() => { if (candidate.status !== "fail") setSelected(candidate); }} className={`transition ${candidate.status !== "fail" ? "cursor-pointer hover:bg-cyan-50" : "cursor-default opacity-75"} ${selected === candidate ? "bg-cyan-50" : ""}`}>
 <td className="px-4 py-3">
 <StatusPill status={candidate.status} />
 </td>
@@ -550,7 +584,7 @@ export default function Home() {
 <ul className="mt-2 text-xs">
 <RecommendationRow label="목표 질량 오차" value={`${selectedRecommendation.massError >= 0 ? "+" : ""}${formatNumber(selectedRecommendation.massError, 5)} kg`} tone={Math.abs(selectedRecommendation.massError) <= config.fuelMassToleranceKg ? "emerald" : "amber"} />
 <RecommendationRow label="최대 압력 여유" value={`${formatNumber(selectedRecommendation.pressureMargin, 4)} MPa`} tone={selectedRecommendation.pressureMargin >= 0 ? "emerald" : "amber"} />
-<RecommendationRow label="평균 추력 오차" value={`${selectedRecommendation.thrustError >= 0 ? "+" : ""}${formatNumber(selectedRecommendation.thrustError, 2)} N`} tone={Math.abs(selectedRecommendation.thrustError) <= config.averageThrustToleranceN ? "emerald" : "amber"} />
+{selectedRecommendation.thrustError === null ? <RecommendationRow label="평균 추력 오차" value="목표 추력 미입력" /> : <RecommendationRow label="평균 추력 오차" value={`${selectedRecommendation.thrustError >= 0 ? "+" : ""}${formatNumber(selectedRecommendation.thrustError, 2)} N`} tone={Math.abs(selectedRecommendation.thrustError) <= config.averageThrustToleranceN ? "emerald" : "amber"} />}
 <RecommendationRow label="연소 시간 오차" value={`${selectedRecommendation.burnTimeError >= 0 ? "+" : ""}${formatNumber(selectedRecommendation.burnTimeError, 4)} s`} tone={Math.abs(selectedRecommendation.burnTimeError) <= config.burnTimeToleranceSec ? "emerald" : "amber"} />
 <RecommendationRow label="제작 치수 간격" value={selectedRecommendation.dimensionsOnStep ? `${config.manufacturingStepMm ?? 5} mm 배수` : "간격 조건 확인 필요"} tone={selectedRecommendation.dimensionsOnStep ? "emerald" : "amber"} />
 <RecommendationRow label="판정 사유" value={selected.status === "pass" ? "모든 목표 허용 범위 통과" : selected.reasons.join(" ")} tone={selected.status === "pass" ? "emerald" : "amber"} />

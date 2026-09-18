@@ -41,8 +41,11 @@ describe("GSRM Calculator and AS568 catalog", () => {
 
   it("runs every visible catalog row and ranks by passed checks", () => {
     const rows = evaluateAnCatalog(49, AN_SERIES_CATALOG);
-    expect(rows.length).toBeGreaterThan(100);
+    expect(rows.length).toBe(241);
     expect(rows.some((row) => row.partNumber === "AN-129-NBR")).toBe(true);
+    expect(rows.some((row) => row.partNumber === "AN-337-NBR")).toBe(true);
+    expect(rows.some((row) => row.partNumber === "AN-338-NBR")).toBe(true);
+    expect(rows.filter((row) => row.calculation.check.status === "recommend").length + rows.filter((row) => row.calculation.check.status === "conditional").length + rows.filter((row) => row.calculation.check.status === "fail").length).toBe(241);
     expect(rows[0].calculation.check.passedCount).toBeGreaterThanOrEqual(rows.at(-1)!.calculation.check.passedCount);
   });
 

@@ -109,6 +109,7 @@ describe("candidate search", () => {
     expect(() => searchCandidates({ ...BASE_CONFIG, outerDiameterMm: { min: 50, max: 45 } })).toThrow(CandidateSearchInputError);
     expect(() => searchCandidates({ ...BASE_CONFIG, segmentCount: { min: 0, max: 2 } })).toThrow(CandidateSearchInputError);
     expect(() => searchCandidates({ ...BASE_CONFIG, outerDiameterMm: { min: 40, max: 46, step: 5 } })).toThrow(CandidateSearchInputError);
+    expect(() => searchCandidates({ ...BASE_CONFIG, outerDiameterMm: { min: 30, max: 35, step: 5 }, coreDiameterMm: { min: 35, max: 40, step: 5 } })).toThrow(/Do와 do 범위에 유효한 조합/);
   });
 
   it("calculates every combination in a finite detailed range", () => {
@@ -145,6 +146,31 @@ describe("candidate score", () => {
 });
 
 describe("automatic candidate envelope", () => {
+  it("runs the staged automatic regression targets without applying a hidden thrust target", () => {
+    const cases = [
+      [0.287, 3.6, undefined], [0.534, 4, 260], [0.763, 3.8, 310], [1.246, 4.1, undefined],
+      [1.583, 3.5, 420], [1.917, 4, 480], [2.341, 4.1, undefined], [2.786, 3.2, 600],
+    ] as const;
+    for (const [targetFuelMassKg, maximumPressureMpa, targetAverageThrustN] of cases) {
+      const config = createAutomaticCandidateSearchConfig({
+        ...BASE_CONFIG,
+        targetFuelMassKg,
+        maximumPressureMpa,
+        targetAverageThrustN: targetAverageThrustN ?? BASE_CONFIG.targetAverageThrustN,
+        targetThrustEnabled: targetAverageThrustN !== undefined,
+        maxCandidateCount: 30,
+      });
+      const result = searchCandidates(config);
+      expect(result.automaticExpansionStage).toBeGreaterThanOrEqual(0);
+      expect(result.searchEnvelope?.outerDiameterMm.step).toBe(5);
+      expect(result.evaluatedCombinations).toBeGreaterThan(0);
+      expect(result.candidates.every((candidate) => candidate.grainMassKg <= targetFuelMassKg + MASS_UPPER_EPSILON_KG)).toBe(true);
+      expect(result.candidates.every((candidate) => candidate.maximumPressureMpa <= maximumPressureMpa || candidate.status === "fail")).toBe(true);
+      if (targetAverageThrustN === undefined) expect(result.candidates.every((candidate) => candidate.thrustEvaluation === undefined)).toBe(true);
+      else expect(result.candidates.every((candidate) => candidate.thrustEvaluation !== undefined)).toBe(true);
+    }
+  }, 120_000);
+
   it("expands beyond the original 40-50 mm range for a 1 kg target", () => {
     const config = createAutomaticCandidateSearchConfig({ ...BASE_CONFIG, targetFuelMassKg: 1 });
     expect(config.outerDiameterMm.min).toBeLessThan(40);
@@ -179,6 +205,8 @@ describe("automatic candidate envelope", () => {
     const result = searchCandidates(automatic);
     expect(result.targetMassNearbyIncluded).toBe(true);
     expect(result.candidates[0].status).toBe("conditional");
+    expect(result.candidates[0].thrustEvaluation).toBeUndefined();
+    expect(result.candidates[0].score.averageThrustErrorNormalized).toBe(0);
   });
 
   it("reports the real limiting condition for a 1 kg target", () => {
@@ -186,7 +214,7 @@ describe("automatic candidate envelope", () => {
     const result = searchCandidates(automatic);
     expect(result.prefilteredCandidateCount).toBeGreaterThan(200);
     expect(result.targetMassNearbyIncluded).toBe(true);
-    expect(result.warning).toMatch(/목표 질량 후보 없음|최대 압력 초과|평균 추력 불일치|동시에 만족/);
+    expect(result.warning).toMatch(/질량\/시간\/추력 허용 오차 불일치|최대 압력 초과|평균 추력 불일치|동시에 만족/);
   });
 
   it("expands chamber diameter and Do for 1 kg and 2 kg targets", () => {
@@ -227,11 +255,18 @@ describe("automatic candidate envelope", () => {
     expect(result.candidates[0].grainMassKg).toBeLessThanOrEqual(targetFuelMassKg + MASS_UPPER_EPSILON_KG);
   });
 
+  it("prioritizes mass- and pressure-safe candidates before closer failing candidates", () => {
+    const result = searchCandidates(createAutomaticCandidateSearchConfig({ ...BASE_CONFIG, targetFuelMassKg: 1.583, maximumPressureMpa: 4.1, targetThrustEnabled: false }));
+    expect(result.candidates[0]).toBeDefined();
+    expect(result.candidates[0].grainMassKg).toBeLessThanOrEqual(1.583 + MASS_UPPER_EPSILON_KG);
+    expect(result.candidates[0].maximumPressureMpa).toBeLessThanOrEqual(4.1);
+  });
+
   it("reports when no candidate is at or below the target mass", () => {
     const result = searchCandidates(createAutomaticCandidateSearchConfig({ ...BASE_CONFIG, targetFuelMassKg: 0.000001, targetThrustEnabled: false }));
     expect(result.candidates).toHaveLength(0);
-    expect(result.diagnosis).toBe("목표 질량 이하 후보를 찾지 못했습니다.");
-    expect(result.warning).toContain("목표 질량 이하 후보를 찾지 못했습니다.");
+    expect(result.diagnosis).toBe("목표 질량 상한으로 모두 제외");
+    expect(result.warning).toContain("목표 질량 상한으로 모두 제외");
   });
 
   it("reports real asynchronous progress and honours cancellation between batches", async () => {
