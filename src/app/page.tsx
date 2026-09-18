@@ -2,7 +2,7 @@
 
 import { useMemo, useRef, useState } from "react";
 
-import { AN_SERIES_CATALOG, CandidateSearchInputError, calculateGsrmReferenceDiameter, createAutomaticCandidateSearchConfig, DEFAULT_GSRM_WALL_THICKNESS_MM, evaluateAnCatalog, searchCandidates } from "../engine";
+import { AN_SERIES_CATALOG, CandidateSearchInputError, calculateGsrmReferenceDiameter, createAutomaticCandidateSearchConfig, DEFAULT_GSRM_WALL_THICKNESS_MM, estimateCandidateCount, evaluateAnCatalog, searchCandidates } from "../engine";
 import type { GsrmBatchResult } from "../engine";
 import { SCORE_GUIDANCE, sortCandidates } from "./candidate-table";
 import type { CandidateSortDirection, CandidateSortKey } from "./candidate-table";
@@ -235,18 +235,20 @@ export default function Home() {
   };
   const runSearch = () => {
     cancelRequested.current = false;
+    const parsedTargetThrust = Number(targetThrustText);
+    const targetThrustEnabled = targetThrustText.trim() !== "";
+    const baseConfig: CandidateSearchConfig = { ...config, targetAverageThrustN: targetThrustEnabled ? parsedTargetThrust : config.targetAverageThrustN, targetThrustEnabled, mode, burnTimeFilterEnabled: automaticMode ? false : config.burnTimeFilterEnabled };
+    const runConfig: CandidateSearchConfig = mode === "excel" ? { ...baseConfig, targetThrustEnabled: true, outerDiameterMm: { min: config.outerDiameterMm.min, max: config.outerDiameterMm.min, step: 1 }, coreDiameterMm: { min: config.coreDiameterMm.min, max: config.coreDiameterMm.min, step: 1 }, segmentLengthMm: { min: config.segmentLengthMm.min, max: config.segmentLengthMm.min, step: 1 }, segmentCount: { min: config.segmentCount.min, max: config.segmentCount.min }, maxCandidateCount: 1 } : automaticMode ? createAutomaticCandidateSearchConfig(baseConfig) : { ...baseConfig, maxCandidateCount: Number.MAX_SAFE_INTEGER };
+    const totalCandidates = estimateCandidateCount(runConfig);
+    const plannedPrecision = Math.min(totalCandidates, runConfig.maxCandidateCount ?? totalCandidates);
     setRunning(true);
-    setProgressText("후보 영역을 생성하고 예상 질량을 계산하는 중입니다.");
+    setProgressText(`0 / ${plannedPrecision.toLocaleString()}개 정밀 계산 준비 · 전체 ${totalCandidates.toLocaleString()}개 후보`);
     setErrorMessage(null);
     setSortKey(null);
     setSortDirection(null);
     window.setTimeout(() => {
       try {
         if (cancelRequested.current) return;
-        const parsedTargetThrust = Number(targetThrustText);
-        const targetThrustEnabled = targetThrustText.trim() !== "";
-        const baseConfig: CandidateSearchConfig = { ...config, targetAverageThrustN: targetThrustEnabled ? parsedTargetThrust : config.targetAverageThrustN, targetThrustEnabled, mode, burnTimeFilterEnabled: automaticMode ? false : config.burnTimeFilterEnabled };
-        const runConfig: CandidateSearchConfig = mode === "excel" ? { ...baseConfig, targetThrustEnabled: true, outerDiameterMm: { min: config.outerDiameterMm.min, max: config.outerDiameterMm.min, step: 1 }, coreDiameterMm: { min: config.coreDiameterMm.min, max: config.coreDiameterMm.min, step: 1 }, segmentLengthMm: { min: config.segmentLengthMm.min, max: config.segmentLengthMm.min, step: 1 }, segmentCount: { min: config.segmentCount.min, max: config.segmentCount.min }, maxCandidateCount: 1 } : automaticMode ? createAutomaticCandidateSearchConfig(baseConfig) : { ...baseConfig, maxCandidateCount: Number.MAX_SAFE_INTEGER };
         const result = searchCandidates(runConfig);
         if (cancelRequested.current) return;
         setSearch(result);
@@ -262,7 +264,7 @@ export default function Home() {
         setRunning(false);
         setProgressText("");
       }
-    }, 0);
+    }, 50);
   };
   const sortedCandidates = useMemo(() => search ? sortCandidates(search.candidates, sortKey, sortDirection) : [], [search, sortDirection, sortKey]);
   const toggleSort = (key: CandidateSortKey) => {
