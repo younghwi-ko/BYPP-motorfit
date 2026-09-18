@@ -58,4 +58,32 @@ export const SRM_2023_BASELINE_EXPECTED = {
     totalMm2: 14137.1669411541,
     kn: 335.146147243945,
   },
+  pressure: {
+    maximumGaugePressureMpa: 3.98359798256078,
+    burnTimeSec: 2.17673154764489,
+    row28: {
+      webMm: 15,
+      throatAreaMm2: 42.182095952498,
+      freestreamAreaMm2: 176.714586764426,
+      portToThroatAreaRatio: 4.1893268405493,
+      burnRateMmPerSec: 3.09790479842649,
+      grainMassKg: 0.395603169947702,
+    },
+    row29: {
+      webMm: 14.9820143884892,
+      timeSec: 0.00580573409483951,
+      generatedMassFlowKgPerSec: 0.0715204812513745,
+      storedGasMassKg: 0.000415228896480435,
+      absolutePressureFromStateMpa: 3.63172938397429,
+      gaugePressureMpa: 3.53072938397429,
+    },
+    row862: {
+      webMm: -2.77111666946439e-13,
+      timeSec: 2.17673154764489,
+      burnRateMmPerSec: 6.79320902080602,
+      generatedMassFlowKgPerSec: 0.168017095961782,
+      nozzleMassFlowKgPerSec: 0.167805376970878,
+      gaugePressureMpa: 3.48016100982087,
+    },
+  },
 } as const;

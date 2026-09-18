@@ -54,6 +54,8 @@ export interface KnCurvePoint extends BurnAreaBreakdown {
 }
 
 export interface DataAndKnResult {
+  /** Source inputs retained so later calculation stages need no UI-specific state. */
+  input: DataAndKnInput;
   propellantConstants: PropellantConstants;
   chamberVolumeMm3: number;
   grainLengthMm: number;
@@ -73,6 +75,72 @@ export interface DataAndKnResult {
   maximumKn: number;
   averageKn: number;
   knCurve: KnCurvePoint[];
+}
+
+export interface BurnRateCoefficients {
+  /** Saint-Robert coefficient, with pressure in MPa and burn rate in mm/s. */
+  aMmPerSecAtMpa: number;
+  /** Saint-Robert pressure exponent. */
+  pressureExponent: number;
+}
+
+export interface BurnRatePressureBand extends BurnRateCoefficients {
+  /** Inclusive lower edge used by Excel's approximate VLOOKUP. */
+  lowerPressureMpa: number;
+}
+
+export interface PressureSimulationOptions {
+  combustionEfficiency?: number;
+  atmosphericPressureMpa?: number;
+  erosiveBurningCriticalRatio?: number;
+  erosiveBurningCoefficient?: number;
+  burstPressureMpa?: number;
+}
+
+export interface PressureCombustionRow {
+  excelRow: number;
+  interval: number;
+  regressionDistanceMm: number;
+  webMm: number;
+  coreDiameterMm: number;
+  outerDiameterMm: number;
+  grainLengthMm: number;
+  throatAreaMm2: number;
+  throatAreaM2: number;
+  freestreamAreaMm2: number;
+  portToThroatAreaRatio: number;
+  erosiveBurningFactor: number;
+  absolutePressureMpa: number;
+  burnRateCoefficient: number;
+  burnRateExponent: number;
+  burnRateMmPerSec: number;
+  timeSec: number;
+  grainVolumeMm3: number;
+  grainVolumeM3: number;
+  freeVolumeM3: number;
+  grainMassKg: number;
+  generatedMassFlowKgPerSec: number;
+  nozzleMassFlowKgPerSec: number;
+  storedMassRateKgPerSec: number;
+  storedGasMassKg: number;
+  gasDensityKgPerM3: number;
+  absolutePressurePa: number;
+  absolutePressureFromStateMpa: number;
+  gaugePressureMpa: number;
+  gaugePressurePsi: number;
+  theoreticalNozzleMassFlowKgPerSec: number;
+}
+
+export interface PressureCombustionResult {
+  xIncrementMm: number;
+  xIncrementResidualMm: number;
+  solverIterations: number;
+  gasConstantJPerKgK: number;
+  chamberTemperatureK: number;
+  characteristicVelocityMPerSec: number;
+  maximumGaugePressureMpa: number;
+  burnTimeSec: number;
+  rows: readonly PressureCombustionRow[];
 }
 
 export interface ValidationIssue {

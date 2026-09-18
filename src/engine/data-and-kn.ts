@@ -132,6 +132,7 @@ export function calculateDataAndKn(input: DataAndKnInput): DataAndKnResult {
   const finalPoint = knCurve.at(-1)!;
 
   return {
+    input,
     propellantConstants,
     chamberVolumeMm3,
     grainLengthMm,
