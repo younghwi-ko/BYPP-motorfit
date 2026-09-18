@@ -3,9 +3,11 @@ import { describe, expect, it } from "vitest";
 import {
   estimateCandidateCount,
   createAutomaticCandidateSearchConfig,
+  CandidateSearchCancelledError,
   CandidateSearchInputError,
   scoreCandidate,
   searchCandidates,
+  searchCandidatesAsync,
 } from "../src/engine";
 import type { CandidateSearchConfig, PerformanceResult } from "../src/engine";
 
@@ -162,6 +164,7 @@ describe("automatic candidate envelope", () => {
     expect(baseline!.status).toBe("pass");
     expect(result.candidates[0].input).toMatchObject({ grainOuterDiameterMm: 45, grainCoreDiameterMm: 15, segmentLengthMm: 80, segmentCount: 2 });
     expect(result.warning).toContain("자동 탐색 확장 0단계");
+    expect(result.warning).toContain("전역 최적해를 보장하지 않습니다");
   });
 
   it("keeps the closest-mass candidate when target thrust is omitted", () => {
@@ -187,5 +190,41 @@ describe("automatic candidate envelope", () => {
     expect(twoKg.chamberDiameterMm).toBeGreaterThan(oneKg.chamberDiameterMm);
     expect(twoKg.outerDiameterMm.max).toBeGreaterThan(oneKg.outerDiameterMm.max);
     expect(twoKg.automaticExpansionStage).toBe(2);
+    expect(oneKg.coreDiameterMm.min).toBe(BASE_CONFIG.coreDiameterMm.min);
+    expect(twoKg.coreDiameterMm.min).toBe(BASE_CONFIG.coreDiameterMm.min);
+  });
+
+  it("does not silently add a 5 mm core below the configured automatic minimum", () => {
+    const automatic = createAutomaticCandidateSearchConfig({ ...BASE_CONFIG, targetFuelMassKg: 2, maximumPressureMpa: 4.1, targetThrustEnabled: false });
+    const result = searchCandidates(automatic);
+    expect(result.candidates.some((candidate) => candidate.input.grainCoreDiameterMm < BASE_CONFIG.coreDiameterMm.min)).toBe(false);
+    expect(result.candidates[0].input.grainCoreDiameterMm).toBeGreaterThanOrEqual(10);
+    expect(result.candidates[0].maximumPressureMpa).toBeLessThanOrEqual(4.1);
+    expect(result.candidates[0].dataAndKn.knCurve.every((row) => Number.isFinite(row.kn))).toBe(true);
+    expect(result.candidates[0].pressure.combustion.rows.every((row) => Number.isFinite(row.gaugePressureMpa))).toBe(true);
+  });
+
+  it("reports real asynchronous progress and honours cancellation between batches", async () => {
+    const automatic = createAutomaticCandidateSearchConfig({ ...BASE_CONFIG, maximumPressureMpa: 4.1, targetThrustEnabled: false });
+    const progress: number[] = [];
+    let cancel = false;
+    await expect(searchCandidatesAsync(automatic, {
+      batchSize: 2,
+      onProgress: ({ completed }) => {
+        progress.push(completed);
+        if (completed >= 2) cancel = true;
+      },
+      shouldCancel: () => cancel,
+    })).rejects.toBeInstanceOf(CandidateSearchCancelledError);
+    expect(progress).toEqual([0, 2]);
+  });
+
+  it("keeps asynchronous browser results identical to the synchronous engine", async () => {
+    const synchronous = searchCandidates(BASE_CONFIG);
+    const asynchronous = await searchCandidatesAsync(BASE_CONFIG, { batchSize: 1 });
+    expect(asynchronous.candidates[0].grainMassKg).toBe(synchronous.candidates[0].grainMassKg);
+    expect(asynchronous.candidates[0].maximumPressureMpa).toBe(synchronous.candidates[0].maximumPressureMpa);
+    expect(asynchronous.candidates[0].averageThrustN).toBe(synchronous.candidates[0].averageThrustN);
+    expect(asynchronous.evaluatedCombinations).toBe(synchronous.evaluatedCombinations);
   });
 });

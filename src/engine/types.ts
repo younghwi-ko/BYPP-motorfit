@@ -333,11 +333,18 @@ export interface CandidateSearchResult {
   totalCombinations: number;
   evaluatedCombinations: number;
   rejectedByValidation: number;
+  prevalidationRejectedCount?: number;
+  precisionValidationRejectedCount?: number;
   calculationFailures: number;
   prefilteredCandidateCount?: number;
   targetMassNearbyIncluded?: boolean;
   truncated: boolean;
   warning?: string;
+}
+
+export interface CandidateSearchProgress {
+  completed: number;
+  total: number;
 }
 
 export interface NozzleDesignInput {

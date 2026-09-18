@@ -2,7 +2,7 @@
 
 import { useMemo, useRef, useState } from "react";
 
-import { AN_SERIES_CATALOG, CandidateSearchInputError, calculateGsrmReferenceDiameter, createAutomaticCandidateSearchConfig, DEFAULT_GSRM_WALL_THICKNESS_MM, estimateCandidateCount, evaluateAnCatalog, searchCandidates } from "../engine";
+import { AN_SERIES_CATALOG, CandidateSearchCancelledError, CandidateSearchInputError, calculateGsrmReferenceDiameter, createAutomaticCandidateSearchConfig, DEFAULT_GSRM_WALL_THICKNESS_MM, estimateCandidateCount, evaluateAnCatalog, searchCandidatesAsync } from "../engine";
 import type { GsrmBatchResult } from "../engine";
 import { SCORE_GUIDANCE, sortCandidates } from "./candidate-table";
 import type { CandidateSortDirection, CandidateSortKey } from "./candidate-table";
@@ -52,10 +52,6 @@ const PROPELLANTS = [
 
 const formatNumber = (value: number, digits = 3) =>
   value.toLocaleString("ko-KR", { maximumFractionDigits: digits });
-
-function candidateFit(candidate: CandidateResult): "추천" | "조건부" | "탈락" {
-  return candidate.status === "pass" ? "추천" : candidate.status === "conditional" ? "조건부" : "탈락";
-}
 
 function Field({ label, value, step = "any", onChange, suffix }: { label: string; value: number; step?: number | "any"; onChange: (value: number) => void; suffix?: string }) {
   return (
@@ -215,6 +211,7 @@ export default function Home() {
   const [targetThrustText, setTargetThrustText] = useState("");
   const [detailsOpen, setDetailsOpen] = useState(false);
   const [progressText, setProgressText] = useState("");
+  const [progressPercent, setProgressPercent] = useState(0);
   const cancelRequested = useRef(false);
 
   const updateNumber = (key: keyof CandidateSearchConfig, value: number) => setConfig((current) => ({ ...current, [key]: value }));
@@ -232,8 +229,9 @@ export default function Home() {
     setSortDirection(null);
     setGsrmWallThicknessMm(DEFAULT_GSRM_WALL_THICKNESS_MM);
     setProgressText("");
+    setProgressPercent(0);
   };
-  const runSearch = () => {
+  const runSearch = async () => {
     cancelRequested.current = false;
     const parsedTargetThrust = Number(targetThrustText);
     const targetThrustEnabled = targetThrustText.trim() !== "";
@@ -243,28 +241,36 @@ export default function Home() {
     const plannedPrecision = Math.min(totalCandidates, runConfig.maxCandidateCount ?? totalCandidates);
     setRunning(true);
     setProgressText(`0 / ${plannedPrecision.toLocaleString()}개 정밀 계산 준비 · 전체 ${totalCandidates.toLocaleString()}개 후보`);
+    setProgressPercent(0);
     setErrorMessage(null);
     setSortKey(null);
     setSortDirection(null);
-    window.setTimeout(() => {
-      try {
-        if (cancelRequested.current) return;
-        const result = searchCandidates(runConfig);
-        if (cancelRequested.current) return;
-        setSearch(result);
-        setSelected(result.candidates[0] ?? null);
-        setSortKey(null);
-        setSortDirection(null);
-      } catch (error) {
-        const message = error instanceof CandidateSearchInputError ? error.issues.join(" ") : "후보 계산 중 오류가 발생했습니다. 입력 범위와 물성값을 확인한 뒤 다시 시도하세요.";
-        setErrorMessage(message);
-        setSearch(null);
-        setSelected(null);
-      } finally {
-        setRunning(false);
-        setProgressText("");
-      }
-    }, 50);
+    await new Promise<void>((resolve) => window.setTimeout(resolve, 0));
+    try {
+      const result = await searchCandidatesAsync(runConfig, {
+        batchSize: 10,
+        shouldCancel: () => cancelRequested.current,
+        onProgress: ({ completed, total }) => {
+          setProgressText(`${completed.toLocaleString()} / ${total.toLocaleString()}개 정밀 계산 · 전체 ${totalCandidates.toLocaleString()}개 후보`);
+          setProgressPercent(total === 0 ? 100 : (completed / total) * 100);
+        },
+      });
+      if (cancelRequested.current) return;
+      setSearch(result);
+      setSelected(result.candidates[0] ?? null);
+      setSortKey(null);
+      setSortDirection(null);
+    } catch (error) {
+      if (error instanceof CandidateSearchCancelledError) return;
+      const message = error instanceof CandidateSearchInputError ? error.issues.join(" ") : "후보 계산 중 오류가 발생했습니다. 입력 범위와 물성값을 확인한 뒤 다시 시도하세요.";
+      setErrorMessage(message);
+      setSearch(null);
+      setSelected(null);
+    } finally {
+      setRunning(false);
+      setProgressText("");
+      setProgressPercent(0);
+    }
   };
   const sortedCandidates = useMemo(() => search ? sortCandidates(search.candidates, sortKey, sortDirection) : [], [search, sortDirection, sortKey]);
   const toggleSort = (key: CandidateSortKey) => {
@@ -444,7 +450,7 @@ export default function Home() {
           </div>
 </div>
 <button type="button" onClick={runSearch} disabled={running} className={`${automaticMode && mode !== "excel" ? "hidden" : "mt-6"} w-full rounded-xl bg-cyan-600 px-4 py-3 text-sm font-bold text-white shadow-lg shadow-cyan-600/20 transition hover:bg-cyan-700 disabled:cursor-wait disabled:opacity-60`}>{running ? "계산 중…" : mode === "excel" ? "Excel 재현 계산" : "상세 후보 탐색 실행"}</button>
-{running ? <div className="mt-3 rounded-xl border border-cyan-100 bg-cyan-50 px-3 py-2 text-xs text-cyan-900"><div className="h-1.5 overflow-hidden rounded-full bg-cyan-100"><div className="h-full w-2/3 animate-pulse rounded-full bg-cyan-500" /></div><div className="mt-2 flex items-center justify-between gap-2"><span>{progressText}</span><button type="button" onClick={() => { cancelRequested.current = true; setRunning(false); setProgressText(""); }} className="rounded-lg border border-cyan-300 bg-white px-2 py-1 font-bold">계산 취소</button></div></div> : null}
+{running ? <div className="mt-3 rounded-xl border border-cyan-100 bg-cyan-50 px-3 py-2 text-xs text-cyan-900"><div className="h-1.5 overflow-hidden rounded-full bg-cyan-100"><div className="h-full rounded-full bg-cyan-500 transition-[width]" style={{ width: `${progressPercent}%` }} /></div><div className="mt-2 flex items-center justify-between gap-2"><span>{progressText}</span><button type="button" onClick={() => { cancelRequested.current = true; setProgressText("계산 취소 요청 중…"); }} className="rounded-lg border border-cyan-300 bg-white px-2 py-1 font-bold">계산 취소</button></div></div> : null}
 <p className="mt-3 text-center text-[11px] text-slate-400">계산은 버튼을 누를 때 브라우저에서 실행됩니다.</p>
         </aside>
         <section className="min-w-0">{errorMessage ? <div className="mb-4 rounded-2xl border border-rose-200 bg-rose-50 px-4 py-3 text-sm leading-6 text-rose-800">
@@ -460,11 +466,12 @@ export default function Home() {
 <div className="flex flex-col gap-3 rounded-2xl border border-slate-200 bg-white px-5 py-4 shadow-sm sm:flex-row sm:items-center sm:justify-between">
 <div>
 <p className="text-sm font-bold text-slate-950">탐색 결과</p>
-<p className="mt-1 text-xs text-slate-500">전체 {search.totalCombinations.toLocaleString()}개 · 사전 제외 {search.rejectedByValidation.toLocaleString()}개 · 질량 계산 {(search.prefilteredCandidateCount ?? search.totalCombinations).toLocaleString()}개 · 정밀 계산 {search.evaluatedCombinations.toLocaleString()}개 · 추천 {search.candidates.filter((candidate) => candidateFit(candidate) === "추천").length}개 · 조건부 {search.candidates.filter((candidate) => candidateFit(candidate) === "조건부").length}개 · 탈락 {search.candidates.filter((candidate) => candidateFit(candidate) === "탈락").length}개 · 계산 실패 {search.calculationFailures.toLocaleString()}개</p>
+<p className="mt-1 text-xs text-slate-500">전체 {search.totalCombinations.toLocaleString()}개 · 정밀 계산 전 제외 {(search.prevalidationRejectedCount ?? search.rejectedByValidation).toLocaleString()}개 · 질량 계산 {(search.prefilteredCandidateCount ?? search.totalCombinations).toLocaleString()}개 · 정밀 계산 {search.evaluatedCombinations.toLocaleString()}개 · 정밀 검증 탈락 {(search.precisionValidationRejectedCount ?? 0).toLocaleString()}개 · 추천 {search.candidates.filter((candidate) => candidate.status === "pass").length}개 · 조건부 {search.candidates.filter((candidate) => candidate.status === "conditional").length}개 · 탈락 {search.candidates.filter((candidate) => candidate.status === "fail").length}개 · 계산 실패 {search.calculationFailures.toLocaleString()}개</p>
 </div>
 <div className="flex gap-2 text-xs">
-<span className="rounded-full bg-emerald-100 px-2.5 py-1 font-bold text-emerald-700">통과 {search.passedCandidates.length}</span>
-<span className="rounded-full bg-slate-100 px-2.5 py-1 font-bold text-slate-600">탈락 {search.candidates.length - search.passedCandidates.length}</span>
+<span className="rounded-full bg-emerald-100 px-2.5 py-1 font-bold text-emerald-700">추천 {search.candidates.filter((candidate) => candidate.status === "pass").length}</span>
+<span className="rounded-full bg-cyan-100 px-2.5 py-1 font-bold text-cyan-700">조건부 {search.candidates.filter((candidate) => candidate.status === "conditional").length}</span>
+<span className="rounded-full bg-slate-100 px-2.5 py-1 font-bold text-slate-600">탈락 {search.candidates.filter((candidate) => candidate.status === "fail").length}</span>
 </div>
 </div>{search.warning ? <div className="rounded-2xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-800">⚠ {search.warning}</div> : null}{search.candidates.length === 0 ? <div className="rounded-2xl border border-amber-200 bg-amber-50 px-4 py-4 text-sm leading-6 text-amber-900">
 <p className="font-bold">조건을 만족한 후보가 없습니다.</p>

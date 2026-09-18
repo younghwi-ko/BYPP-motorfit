@@ -16,10 +16,12 @@ export { calculatePerformance } from "./performance";
 export { createMotorOutput } from "./output";
 export { scoreCandidate } from "./candidate-score";
 export {
+  CandidateSearchCancelledError,
   CandidateSearchInputError,
   estimateCandidateCount,
   createAutomaticCandidateSearchConfig,
   searchCandidates,
+  searchCandidatesAsync,
   validateCandidateSearchConfig,
 } from "./candidate-search";
 export { calculateNozzleDesign } from "./nozzle-design";
@@ -56,6 +58,7 @@ export type {
   CandidateResult,
   CandidateScoreBreakdown,
   CandidateSearchConfig,
+  CandidateSearchProgress,
   CandidateSearchResult,
   DataAndKnInput,
   DataAndKnResult,

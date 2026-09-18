@@ -13,6 +13,7 @@ import type {
   CandidateNumberRange,
   CandidateResult,
   CandidateSearchConfig,
+  CandidateSearchProgress,
   CandidateSearchResult,
   DataAndKnInput,
 } from "./types";
@@ -28,11 +29,16 @@ export class CandidateSearchInputError extends Error {
   }
 }
 
+export class CandidateSearchCancelledError extends Error {
+  constructor() {
+    super("Candidate search was cancelled.");
+    this.name = "CandidateSearchCancelledError";
+  }
+}
+
 function validateRange(name: string, range: CandidateNumberRange, issues: string[]) {
   const step = range.step ?? 5;
-  if (!Number.isFinite(range.min) || !Number.isFinite(range.max) || range.min > range.max) {
-    issues.push(`${name} 범위의 최소·최대값을 확인하세요.`);
-  }
+  if (!Number.isFinite(range.min) || !Number.isFinite(range.max) || range.min > range.max) issues.push(`${name} 범위의 최소·최대값을 확인하세요.`);
   if (!Number.isFinite(step) || step <= 0) issues.push(`${name} 간격은 0보다 큰 숫자여야 합니다.`);
 }
 
@@ -41,9 +47,9 @@ export function validateCandidateSearchConfig(config: CandidateSearchConfig): re
   const positive = [
     ["챔버 직경", config.chamberDiameterMm], ["챔버 길이", config.chamberLengthMm],
     ["목표 연료 질량", config.targetFuelMassKg], ["질량 허용 오차", config.fuelMassToleranceKg],
-    ["최대 허용 압력", config.maximumPressureMpa],
-    ["추력 허용 오차", config.averageThrustToleranceN], ["목표 연소 시간", config.targetBurnTimeSec],
-    ["시간 허용 오차", config.burnTimeToleranceSec], ["목표 압력", config.targetPressureMpa],
+    ["최대 허용 압력", config.maximumPressureMpa], ["추력 허용 오차", config.averageThrustToleranceN],
+    ["목표 연소 시간", config.targetBurnTimeSec], ["시간 허용 오차", config.burnTimeToleranceSec],
+    ["목표 압력", config.targetPressureMpa],
   ] as const;
   if (config.targetThrustEnabled !== false && (!Number.isFinite(config.targetAverageThrustN) || config.targetAverageThrustN <= 0)) issues.push("목표 평균 추력은 0보다 큰 유한값이어야 합니다.");
   for (const [name, value] of positive) if (!Number.isFinite(value) || value <= 0) issues.push(`${name}은 0보다 큰 유한값이어야 합니다.`);
@@ -65,19 +71,9 @@ export function validateCandidateSearchConfig(config: CandidateSearchConfig): re
 
 function rangeValues(range: CandidateNumberRange, fallbackStep: number): number[] {
   const step = range.step ?? fallbackStep;
-  if (
-    !Number.isFinite(range.min) ||
-    !Number.isFinite(range.max) ||
-    !Number.isFinite(step) ||
-    step <= 0 ||
-    range.max < range.min
-  ) {
-    return [];
-  }
+  if (!Number.isFinite(range.min) || !Number.isFinite(range.max) || !Number.isFinite(step) || step <= 0 || range.max < range.min) return [];
   const values: number[] = [];
-  for (let value = range.min; value <= range.max + step * 1e-9; value += step) {
-    values.push(Number(value.toFixed(12)));
-  }
+  for (let value = range.min; value <= range.max + step * 1e-9; value += step) values.push(Number(value.toFixed(12)));
   return values;
 }
 
@@ -87,12 +83,7 @@ function integerValues(min: number, max: number): number[] {
 }
 
 export function estimateCandidateCount(config: CandidateSearchConfig): number {
-  return (
-    rangeValues(config.outerDiameterMm, 5).length *
-    rangeValues(config.coreDiameterMm, 5).length *
-    rangeValues(config.segmentLengthMm, 5).length *
-    integerValues(config.segmentCount.min, config.segmentCount.max).length
-  );
+  return rangeValues(config.outerDiameterMm, 5).length * rangeValues(config.coreDiameterMm, 5).length * rangeValues(config.segmentLengthMm, 5).length * integerValues(config.segmentCount.min, config.segmentCount.max).length;
 }
 
 /** Build a bounded 5 mm manufacturing search envelope from target mass. */
@@ -105,15 +96,18 @@ export function createAutomaticCandidateSearchConfig(config: CandidateSearchConf
   const chamberMax = Math.max(5, Math.floor(chamberDiameterMm / 5) * 5);
   const outerMin = Math.max(30, chamberMax - 40);
   const outerMax = chamberMax;
-  const coreMax = Math.max(20, outerMax - 10);
+  const configuredCoreMin = Math.ceil(config.coreDiameterMm.min / 5) * 5;
+  const coreMin = Math.max(5, configuredCoreMin);
+  const coreMax = Math.max(coreMin, outerMax - 10);
   const lengthMax = Math.max(85, Math.min(chamberLengthMm, Math.ceil(85 * linearScale / 5) * 5));
-  const precisionBudget = expansionStage === 0 ? 600 : expansionStage === 1 ? 1000 : 1600;
+  const precisionBudget = expansionStage === 0 ? 600 : expansionStage === 1 ? 1_000 : 1_600;
   return {
     ...config,
     chamberDiameterMm,
     chamberLengthMm,
     outerDiameterMm: { min: outerMin, max: outerMax, step: 5 },
-    coreDiameterMm: { min: 5, max: coreMax, step: 5 },
+    // Automatic expansion must not silently relax the user's configured minimum core diameter.
+    coreDiameterMm: { min: coreMin, max: coreMax, step: 5 },
     segmentLengthMm: { min: 25, max: lengthMax, step: 5 },
     segmentCount: { min: 1, max: Math.min(8, Math.max(3, Math.ceil(linearScale * 3))) },
     maxCandidateCount: precisionBudget,
@@ -132,163 +126,98 @@ interface CandidateGeometry {
   approximateMassKg: number;
 }
 
+interface PreparedSearch {
+  totalCombinations: number;
+  prevalidationRejectedCount: number;
+  geometries: CandidateGeometry[];
+  precisionGeometries: CandidateGeometry[];
+  truncated: boolean;
+  targetMassNearbyIncluded: boolean;
+}
+
+interface SearchCounters {
+  evaluatedCombinations: number;
+  precisionValidationRejectedCount: number;
+  calculationFailures: number;
+}
+
 function approximateGrainMassKg(config: CandidateSearchConfig, outerDiameterMm: number, coreDiameterMm: number, segmentLengthMm: number, segmentCount: number): number {
   const density = config.densityRatio * selectPropellantConstants(config.propellant).idealDensityGPerCm3;
   const volumeMm3 = Math.PI * (outerDiameterMm ** 2 - coreDiameterMm ** 2) * segmentLengthMm * segmentCount / 4;
   return density * volumeMm3 / 1_000_000;
 }
 
-function finiteMetrics(candidate: CandidateResult): boolean {
-  return [
-    candidate.grainMassKg,
-    candidate.maximumPressureMpa,
-    candidate.burnTimeSec,
-    candidate.thrustEndTimeSec,
-    candidate.maximumThrustN,
-    candidate.averageThrustN,
-    candidate.totalImpulseNs,
-    candidate.specificImpulseSec,
-  ].every(Number.isFinite);
-}
-
-export function searchCandidates(config: CandidateSearchConfig): CandidateSearchResult {
+function prepareSearch(config: CandidateSearchConfig): PreparedSearch {
   const inputIssues = validateCandidateSearchConfig(config);
   if (inputIssues.length > 0) throw new CandidateSearchInputError(inputIssues);
   const outerValues = rangeValues(config.outerDiameterMm, 5);
   const coreValues = rangeValues(config.coreDiameterMm, 5);
   const lengthValues = rangeValues(config.segmentLengthMm, 5);
-  const segmentValues = integerValues(
-    config.segmentCount.min,
-    config.segmentCount.max,
-  );
-  const totalCombinations =
-    outerValues.length *
-    coreValues.length *
-    lengthValues.length *
-    segmentValues.length;
-  const maxCandidateCount = config.maxCandidateCount ?? DEFAULT_MAX_CANDIDATES;
-  const truncated = totalCombinations > maxCandidateCount;
-  const candidates: CandidateResult[] = [];
-  let evaluatedCombinations = 0;
-  let rejectedByValidation = 0;
-  let calculationFailures = 0;
-
+  const segmentValues = integerValues(config.segmentCount.min, config.segmentCount.max);
+  const totalCombinations = outerValues.length * coreValues.length * lengthValues.length * segmentValues.length;
+  let prevalidationRejectedCount = 0;
   const geometries: CandidateGeometry[] = [];
-  for (const outerDiameterMm of outerValues) {
-    for (const coreDiameterMm of coreValues) {
-      for (const segmentLengthMm of lengthValues) {
-        for (const segmentCount of segmentValues) {
-          if (config.searchOrder === "target-mass" && (outerDiameterMm <= coreDiameterMm || outerDiameterMm > config.chamberDiameterMm || segmentLengthMm * segmentCount > config.chamberLengthMm)) {
-            rejectedByValidation += 1;
-            continue;
-          }
-          geometries.push({
-            outerDiameterMm,
-            coreDiameterMm,
-            segmentLengthMm,
-            segmentCount,
-            approximateMassKg: approximateGrainMassKg(config, outerDiameterMm, coreDiameterMm, segmentLengthMm, segmentCount),
-          });
-        }
-      }
+  for (const outerDiameterMm of outerValues) for (const coreDiameterMm of coreValues) for (const segmentLengthMm of lengthValues) for (const segmentCount of segmentValues) {
+    if (config.searchOrder === "target-mass" && (outerDiameterMm <= coreDiameterMm || outerDiameterMm > config.chamberDiameterMm || segmentLengthMm * segmentCount > config.chamberLengthMm)) {
+      prevalidationRejectedCount += 1;
+      continue;
     }
+    geometries.push({ outerDiameterMm, coreDiameterMm, segmentLengthMm, segmentCount, approximateMassKg: approximateGrainMassKg(config, outerDiameterMm, coreDiameterMm, segmentLengthMm, segmentCount) });
   }
-  if (config.searchOrder === "target-mass") {
-    geometries.sort((left, right) => Math.abs(left.approximateMassKg - config.targetFuelMassKg) - Math.abs(right.approximateMassKg - config.targetFuelMassKg));
-  }
+  if (config.searchOrder === "target-mass") geometries.sort((left, right) => Math.abs(left.approximateMassKg - config.targetFuelMassKg) - Math.abs(right.approximateMassKg - config.targetFuelMassKg));
+  const maxCandidateCount = config.maxCandidateCount ?? DEFAULT_MAX_CANDIDATES;
   const precisionGeometries = geometries.slice(0, maxCandidateCount);
-  const targetMassNearbyIncluded = geometries.length === 0 || precisionGeometries.includes(geometries[0]);
+  return {
+    totalCombinations,
+    prevalidationRejectedCount,
+    geometries,
+    precisionGeometries,
+    truncated: geometries.length > maxCandidateCount,
+    targetMassNearbyIncluded: geometries.length === 0 || precisionGeometries.includes(geometries[0]),
+  };
+}
 
-  for (const { outerDiameterMm, coreDiameterMm, segmentLengthMm, segmentCount } of precisionGeometries) {
-          evaluatedCombinations += 1;
-          const input: DataAndKnInput = {
-            chamberDiameterMm: config.chamberDiameterMm,
-            chamberLengthMm: config.chamberLengthMm,
-            propellant: config.propellant,
-            grainOuterDiameterMm: outerDiameterMm,
-            grainCoreDiameterMm: coreDiameterMm,
-            segmentLengthMm,
-            segmentCount,
-            outerSurface: config.outerSurface,
-            coreSurface: config.coreSurface,
-            endsSurface: config.endsSurface,
-            densityRatio: config.densityRatio,
-            targetPressureMpa: config.targetPressureMpa,
-            nozzleErosionMm: config.nozzleErosionMm,
-          };
-          const validationIssues =
-            config.mode === "excel"
-              ? validateExcelReproductionInput(input)
-              : validateManufacturingCandidate(input, {
-                  dimensionalStepMm:
-                    config.manufacturingStepMm ??
-                    DEFAULT_MANUFACTURING_CONSTRAINTS.dimensionalStepMm,
-                });
-          if (validationIssues.length > 0) {
-            rejectedByValidation += 1;
-            continue;
-          }
+function finiteMetrics(candidate: CandidateResult): boolean {
+  return [candidate.grainMassKg, candidate.maximumPressureMpa, candidate.burnTimeSec, candidate.thrustEndTimeSec, candidate.maximumThrustN, candidate.averageThrustN, candidate.totalImpulseNs, candidate.specificImpulseSec].every(Number.isFinite);
+}
 
-          try {
-            const dataAndKn = calculateDataAndKn(input);
-            const pressure = calculatePressure(dataAndKn);
-            const performance = calculatePerformance(dataAndKn, pressure);
-            const thrustEvaluation = config.targetThrustEnabled === false ? undefined : evaluateThrustCurve(performance, config.targetAverageThrustN);
-            const score = scoreCandidate(config, {
-              grainMassKg: dataAndKn.grainMassKg,
-              maximumPressureMpa: pressure.maximumGaugePressureMpa,
-              burnTimeSec: pressure.burnTimeSec,
-              performance,
-              thrustEvaluation,
-            });
-            const reasons: string[] = [];
-            if (
-              Math.abs(dataAndKn.grainMassKg - config.targetFuelMassKg) >
-              config.fuelMassToleranceKg
-            ) {
-              reasons.push("연료 질량 허용 범위를 벗어났습니다.");
-            }
-            if (pressure.maximumGaugePressureMpa > config.maximumPressureMpa) {
-              reasons.push("최대 압력 제한을 초과했습니다.");
-            }
-            if (config.targetThrustEnabled !== false &&
-              Math.abs(
-                performance.averageThrustN - config.targetAverageThrustN,
-              ) > config.averageThrustToleranceN
-            ) {
-              reasons.push("평균 추력 허용 범위를 벗어났습니다.");
-            }
-            if (config.burnTimeFilterEnabled !== false &&
-              Math.abs(pressure.burnTimeSec - config.targetBurnTimeSec) > config.burnTimeToleranceSec) {
-              reasons.push("연소 시간 허용 범위를 벗어났습니다.");
-            }
-
-            const candidate: CandidateResult = {
-              input,
-              grainMassKg: dataAndKn.grainMassKg,
-              maximumPressureMpa: pressure.maximumGaugePressureMpa,
-              burnTimeSec: pressure.burnTimeSec,
-              thrustEndTimeSec: performance.thrustEndTimeSec,
-              maximumThrustN: performance.maximumThrustN,
-              averageThrustN: performance.averageThrustN,
-              totalImpulseNs: performance.totalImpulseNs,
-              specificImpulseSec: performance.specificImpulseSec,
-              motorClass: performance.motorClass,
-              score,
-              status: reasons.length === 0 ? (config.targetThrustEnabled === false ? "conditional" : "pass") : "fail",
-              reasons,
-              dataAndKn,
-              pressure,
-              performance,
-              thrustEvaluation,
-            };
-            if (finiteMetrics(candidate)) candidates.push(candidate);
-            else calculationFailures += 1;
-          } catch {
-            calculationFailures += 1;
-          }
+function evaluateGeometry(config: CandidateSearchConfig, geometry: CandidateGeometry): { candidate?: CandidateResult; rejected?: true; failed?: true } {
+  const input: DataAndKnInput = {
+    chamberDiameterMm: config.chamberDiameterMm, chamberLengthMm: config.chamberLengthMm, propellant: config.propellant,
+    grainOuterDiameterMm: geometry.outerDiameterMm, grainCoreDiameterMm: geometry.coreDiameterMm,
+    segmentLengthMm: geometry.segmentLengthMm, segmentCount: geometry.segmentCount,
+    outerSurface: config.outerSurface, coreSurface: config.coreSurface, endsSurface: config.endsSurface,
+    densityRatio: config.densityRatio, targetPressureMpa: config.targetPressureMpa, nozzleErosionMm: config.nozzleErosionMm,
+  };
+  const validationIssues = config.mode === "excel" ? validateExcelReproductionInput(input) : validateManufacturingCandidate(input, { dimensionalStepMm: config.manufacturingStepMm ?? DEFAULT_MANUFACTURING_CONSTRAINTS.dimensionalStepMm });
+  if (validationIssues.length > 0) return { rejected: true };
+  try {
+    const dataAndKn = calculateDataAndKn(input);
+    const pressure = calculatePressure(dataAndKn);
+    const performance = calculatePerformance(dataAndKn, pressure);
+    const thrustEvaluation = config.targetThrustEnabled === false ? undefined : evaluateThrustCurve(performance, config.targetAverageThrustN);
+    const score = scoreCandidate(config, { grainMassKg: dataAndKn.grainMassKg, maximumPressureMpa: pressure.maximumGaugePressureMpa, burnTimeSec: pressure.burnTimeSec, performance, thrustEvaluation });
+    const reasons: string[] = [];
+    if (Math.abs(dataAndKn.grainMassKg - config.targetFuelMassKg) > config.fuelMassToleranceKg) reasons.push("연료 질량 허용 범위를 벗어났습니다.");
+    if (pressure.maximumGaugePressureMpa > config.maximumPressureMpa) reasons.push("최대 압력 제한을 초과했습니다.");
+    if (config.targetThrustEnabled !== false && Math.abs(performance.averageThrustN - config.targetAverageThrustN) > config.averageThrustToleranceN) reasons.push("평균 추력 허용 범위를 벗어났습니다.");
+    if (config.burnTimeFilterEnabled !== false && Math.abs(pressure.burnTimeSec - config.targetBurnTimeSec) > config.burnTimeToleranceSec) reasons.push("연소 시간 허용 범위를 벗어났습니다.");
+    const candidate: CandidateResult = {
+      input, grainMassKg: dataAndKn.grainMassKg, maximumPressureMpa: pressure.maximumGaugePressureMpa,
+      burnTimeSec: pressure.burnTimeSec, thrustEndTimeSec: performance.thrustEndTimeSec,
+      maximumThrustN: performance.maximumThrustN, averageThrustN: performance.averageThrustN,
+      totalImpulseNs: performance.totalImpulseNs, specificImpulseSec: performance.specificImpulseSec,
+      motorClass: performance.motorClass, score,
+      status: reasons.length === 0 ? (config.targetThrustEnabled === false ? "conditional" : "pass") : "fail",
+      reasons, dataAndKn, pressure, performance, thrustEvaluation,
+    };
+    return finiteMetrics(candidate) ? { candidate } : { failed: true };
+  } catch {
+    return { failed: true };
   }
+}
 
+function finishSearch(config: CandidateSearchConfig, prepared: PreparedSearch, candidates: CandidateResult[], counters: SearchCounters): CandidateSearchResult {
   candidates.sort((left, right) => {
     if (left.status !== right.status) {
       const order = { pass: 0, conditional: 1, fail: 2 } as const;
@@ -301,35 +230,54 @@ export function searchCandidates(config: CandidateSearchConfig): CandidateSearch
   const closestThrustCandidate = candidates.reduce<CandidateResult | undefined>((closest, candidate) => !closest || Math.abs(candidate.averageThrustN - config.targetAverageThrustN) < Math.abs(closest.averageThrustN - config.targetAverageThrustN) ? candidate : closest, undefined);
   const pressurePassing = candidates.filter((candidate) => candidate.maximumPressureMpa <= config.maximumPressureMpa);
   const hasMassMatch = pressurePassing.some((candidate) => Math.abs(candidate.grainMassKg - config.targetFuelMassKg) <= config.fuelMassToleranceKg);
-  const hasThrustMatch = pressurePassing.some((candidate) => Math.abs(candidate.averageThrustN - config.targetAverageThrustN) <= config.averageThrustToleranceN);
-  const automaticDiagnosis = candidates.length === 0
-    ? "탐색 범위에 계산 가능한 후보 없음"
-    : pressurePassing.length === 0
-      ? "후보는 있지만 최대 압력 초과"
-      : !hasMassMatch
-        ? "검색 범위에 목표 질량 후보 없음"
-        : !hasThrustMatch
-          ? "후보는 있지만 평균 추력 불일치"
-          : passedCandidates.length === 0
-            ? "입력한 질량과 추력 조합을 동시에 만족하는 후보 없음"
-            : "목표 조건 동시 충족 후보 있음";
+  const hasThrustMatch = config.targetThrustEnabled === false || pressurePassing.some((candidate) => Math.abs(candidate.averageThrustN - config.targetAverageThrustN) <= config.averageThrustToleranceN);
+  const automaticDiagnosis = candidates.length === 0 ? "탐색 범위에 계산 가능한 후보 없음" : pressurePassing.length === 0 ? "후보는 있지만 최대 압력 초과" : !hasMassMatch ? "검색 범위에 목표 질량 후보 없음" : !hasThrustMatch ? "후보는 있지만 평균 추력 불일치" : passedCandidates.length === 0 ? "입력한 질량과 추력 조합을 동시에 만족하는 후보 없음" : "목표 조건 동시 충족 후보 있음";
   const automaticSummary = config.searchOrder === "target-mass"
-    ? `자동 탐색 확장 ${config.automaticExpansionStage ?? 0}단계. 전체 후보 ${totalCombinations.toLocaleString()}개, 사전 제외 ${rejectedByValidation.toLocaleString()}개, 질량 계산 ${geometries.length.toLocaleString()}개, 정밀 계산 ${evaluatedCombinations.toLocaleString()}개, 목표 질량 근처 후보 ${targetMassNearbyIncluded ? "포함" : "누락"}. 가장 가까운 질량 ${closestMassCandidate?.grainMassKg.toFixed(4) ?? "없음"} kg, 가장 가까운 추력 ${config.targetThrustEnabled === false ? "미입력" : `${closestThrustCandidate?.averageThrustN.toFixed(2) ?? "없음"} N`}. 진단: ${automaticDiagnosis}.`
+    ? `자동 탐색 확장 ${config.automaticExpansionStage ?? 0}단계. 전체 후보 ${prepared.totalCombinations.toLocaleString()}개, 정밀 계산 전 제외 ${prepared.prevalidationRejectedCount.toLocaleString()}개, 질량 계산 ${prepared.geometries.length.toLocaleString()}개, 정밀 계산 ${counters.evaluatedCombinations.toLocaleString()}개, 정밀 검증 탈락 ${counters.precisionValidationRejectedCount.toLocaleString()}개, 목표 질량 근처 후보 ${prepared.targetMassNearbyIncluded ? "포함" : "누락"}. 가장 가까운 질량 ${closestMassCandidate?.grainMassKg.toFixed(4) ?? "없음"} kg, 가장 가까운 추력 ${config.targetThrustEnabled === false ? "미입력" : `${closestThrustCandidate?.averageThrustN.toFixed(2) ?? "없음"} N`}. 진단: ${automaticDiagnosis}.`
     : undefined;
+  const partialWarning = "전체 조합 중 목표 질량 근처 일부 후보만 정밀 계산한 근사 추천이며, 전체 탐색 공간의 전역 최적해를 보장하지 않습니다.";
   return {
-    candidates,
-    passedCandidates,
-    totalCombinations,
-    evaluatedCombinations,
-    rejectedByValidation,
-    calculationFailures,
-    prefilteredCandidateCount: geometries.length,
-    targetMassNearbyIncluded,
-    truncated,
-    warning: truncated
-      ? config.searchOrder === "target-mass"
-        ? `후보 조합 중 일부만 정밀 계산했으며, 목표 질량 근처 후보를 우선 평가했습니다. ${automaticSummary}`
-        : `후보 조합 ${totalCombinations.toLocaleString()}개 중 ${maxCandidateCount.toLocaleString()}개까지만 계산했습니다.`
-      : automaticSummary,
+    candidates, passedCandidates, totalCombinations: prepared.totalCombinations,
+    evaluatedCombinations: counters.evaluatedCombinations,
+    rejectedByValidation: prepared.prevalidationRejectedCount + counters.precisionValidationRejectedCount,
+    prevalidationRejectedCount: prepared.prevalidationRejectedCount,
+    precisionValidationRejectedCount: counters.precisionValidationRejectedCount,
+    calculationFailures: counters.calculationFailures,
+    prefilteredCandidateCount: prepared.geometries.length,
+    targetMassNearbyIncluded: prepared.targetMassNearbyIncluded,
+    truncated: prepared.truncated,
+    warning: prepared.truncated ? config.searchOrder === "target-mass" ? `${partialWarning} ${automaticSummary}` : `후보 조합 ${prepared.totalCombinations.toLocaleString()}개 중 ${counters.evaluatedCombinations.toLocaleString()}개만 계산했으며 전역 최적해를 보장하지 않습니다.` : automaticSummary,
   };
+}
+
+function accumulate(result: ReturnType<typeof evaluateGeometry>, candidates: CandidateResult[], counters: SearchCounters) {
+  counters.evaluatedCombinations += 1;
+  if (result.candidate) candidates.push(result.candidate);
+  else if (result.rejected) counters.precisionValidationRejectedCount += 1;
+  else counters.calculationFailures += 1;
+}
+
+export function searchCandidates(config: CandidateSearchConfig): CandidateSearchResult {
+  const prepared = prepareSearch(config);
+  const candidates: CandidateResult[] = [];
+  const counters: SearchCounters = { evaluatedCombinations: 0, precisionValidationRejectedCount: 0, calculationFailures: 0 };
+  for (const geometry of prepared.precisionGeometries) accumulate(evaluateGeometry(config, geometry), candidates, counters);
+  return finishSearch(config, prepared, candidates, counters);
+}
+
+export async function searchCandidatesAsync(config: CandidateSearchConfig, options: { batchSize?: number; onProgress?: (progress: CandidateSearchProgress) => void; shouldCancel?: () => boolean } = {}): Promise<CandidateSearchResult> {
+  const prepared = prepareSearch(config);
+  const candidates: CandidateResult[] = [];
+  const counters: SearchCounters = { evaluatedCombinations: 0, precisionValidationRejectedCount: 0, calculationFailures: 0 };
+  const batchSize = Math.max(1, Math.floor(options.batchSize ?? 10));
+  options.onProgress?.({ completed: 0, total: prepared.precisionGeometries.length });
+  for (const geometry of prepared.precisionGeometries) {
+    if (options.shouldCancel?.()) throw new CandidateSearchCancelledError();
+    accumulate(evaluateGeometry(config, geometry), candidates, counters);
+    if (counters.evaluatedCombinations % batchSize === 0 || counters.evaluatedCombinations === prepared.precisionGeometries.length) {
+      options.onProgress?.({ completed: counters.evaluatedCombinations, total: prepared.precisionGeometries.length });
+      await new Promise<void>((resolve) => setTimeout(resolve, 0));
+    }
+  }
+  return finishSearch(config, prepared, candidates, counters);
 }
