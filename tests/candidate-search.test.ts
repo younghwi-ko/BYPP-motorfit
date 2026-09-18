@@ -262,6 +262,31 @@ describe("automatic candidate envelope", () => {
     expect(result.candidates[0].maximumPressureMpa).toBeLessThanOrEqual(4.1);
   });
 
+  it("keeps the nearest rejected candidate aligned with the nearest-mass summary", () => {
+    const result = searchCandidates(createAutomaticCandidateSearchConfig({
+      ...BASE_CONFIG,
+      targetFuelMassKg: 0.763,
+      maximumPressureMpa: 3.8,
+      targetAverageThrustN: 310,
+      targetThrustEnabled: true,
+    }));
+    expect(result.passedCandidates).toHaveLength(0);
+    expect(result.nearestRejectedCandidate?.input).toMatchObject({
+      grainOuterDiameterMm: 55,
+      grainCoreDiameterMm: 20,
+      segmentLengthMm: 105,
+      segmentCount: 2,
+    });
+    expect(result.nearestRejectedCandidate?.grainMassKg).toBeCloseTo(0.7572, 4);
+    expect(result.warning).toContain(`가장 가까운 질량 ${result.nearestRejectedCandidate?.grainMassKg.toFixed(4)} kg`);
+  });
+
+  it("does not expose a rejected reference when a valid candidate exists", () => {
+    const result = searchCandidates(BASE_CONFIG);
+    expect(result.passedCandidates).toHaveLength(1);
+    expect(result.nearestRejectedCandidate).toBeUndefined();
+  });
+
   it("reports when no candidate is at or below the target mass", () => {
     const result = searchCandidates(createAutomaticCandidateSearchConfig({ ...BASE_CONFIG, targetFuelMassKg: 0.000001, targetThrustEnabled: false }));
     expect(result.candidates).toHaveLength(0);

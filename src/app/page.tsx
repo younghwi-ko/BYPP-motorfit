@@ -293,18 +293,8 @@ export default function Home() {
   };
   const sortedCandidates = useMemo(() => search ? sortCandidates(search.candidates, sortKey, sortDirection) : [], [search, sortDirection, sortKey]);
   const closestFailedCandidate = useMemo(() => {
-    if (!search) return null;
-    return search.candidates.filter((candidate) => candidate.status === "fail").reduce<CandidateResult | null>((closest, candidate) => {
-      if (!closest) return candidate;
-      const candidateMassOver = candidate.grainMassKg > config.targetFuelMassKg ? 1 : 0;
-      const closestMassOver = closest.grainMassKg > config.targetFuelMassKg ? 1 : 0;
-      if (candidateMassOver !== closestMassOver) return candidateMassOver < closestMassOver ? candidate : closest;
-      const candidatePressureOver = candidate.maximumPressureMpa > config.maximumPressureMpa ? 1 : 0;
-      const closestPressureOver = closest.maximumPressureMpa > config.maximumPressureMpa ? 1 : 0;
-      if (candidatePressureOver !== closestPressureOver) return candidatePressureOver < closestPressureOver ? candidate : closest;
-      return Math.abs(candidate.grainMassKg - config.targetFuelMassKg) < Math.abs(closest.grainMassKg - config.targetFuelMassKg) ? candidate : closest;
-    }, null);
-  }, [config.maximumPressureMpa, config.targetFuelMassKg, search]);
+    return search?.nearestRejectedCandidate ?? null;
+  }, [search]);
   const toggleSort = (key: CandidateSortKey) => {
     if (sortKey !== key) {
       setSortKey(key);

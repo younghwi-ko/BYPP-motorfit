@@ -264,7 +264,14 @@ function compareCandidatePriority(left: CandidateResult, right: CandidateResult,
 function finishSearch(config: CandidateSearchConfig, prepared: PreparedSearch, candidates: CandidateResult[], counters: SearchCounters): CandidateSearchResult {
   candidates.sort((left, right) => compareCandidatePriority(left, right, config));
   const passedCandidates = candidates.filter((candidate) => candidate.status !== "fail");
-  const closestMassCandidate = candidates.reduce<CandidateResult | undefined>((closest, candidate) => !closest || Math.abs(candidate.grainMassKg - config.targetFuelMassKg) < Math.abs(closest.grainMassKg - config.targetFuelMassKg) ? candidate : closest, undefined);
+  const nearestRejectedCandidate = candidates.filter((candidate) => candidate.status === "fail").reduce<CandidateResult | undefined>((closest, candidate) => {
+    if (!closest) return candidate;
+    const candidateDistance = Math.abs(candidate.grainMassKg - config.targetFuelMassKg);
+    const closestDistance = Math.abs(closest.grainMassKg - config.targetFuelMassKg);
+    if (candidateDistance !== closestDistance) return candidateDistance < closestDistance ? candidate : closest;
+    return compareCandidatePriority(candidate, closest, config) < 0 ? candidate : closest;
+  }, undefined);
+  const closestMassCandidate = (passedCandidates.length === 0 ? nearestRejectedCandidate : candidates.reduce<CandidateResult | undefined>((closest, candidate) => !closest || Math.abs(candidate.grainMassKg - config.targetFuelMassKg) < Math.abs(closest.grainMassKg - config.targetFuelMassKg) ? candidate : closest, undefined));
   const closestThrustCandidate = candidates.reduce<CandidateResult | undefined>((closest, candidate) => !closest || Math.abs(candidate.averageThrustN - config.targetAverageThrustN) < Math.abs(closest.averageThrustN - config.targetAverageThrustN) ? candidate : closest, undefined);
   const pressurePassing = candidates.filter((candidate) => candidate.maximumPressureMpa <= config.maximumPressureMpa);
   const hasMassMatch = pressurePassing.some((candidate) => Math.abs(candidate.grainMassKg - config.targetFuelMassKg) <= config.fuelMassToleranceKg);
@@ -291,7 +298,7 @@ function finishSearch(config: CandidateSearchConfig, prepared: PreparedSearch, c
     : undefined;
   const partialWarning = "전체 조합 중 목표 질량 근처 일부 후보만 정밀 계산한 근사 추천이며, 전체 탐색 공간의 전역 최적해를 보장하지 않습니다.";
   return {
-    candidates, passedCandidates, totalCombinations: prepared.totalCombinations,
+    candidates, passedCandidates, nearestRejectedCandidate, totalCombinations: prepared.totalCombinations,
     evaluatedCombinations: counters.evaluatedCombinations,
     rejectedByValidation: prepared.prevalidationRejectedCount + counters.precisionValidationRejectedCount,
     prevalidationRejectedCount: prepared.prevalidationRejectedCount,

@@ -330,6 +330,7 @@ export interface ThrustCurveEvaluation {
 export interface CandidateSearchResult {
   candidates: readonly CandidateResult[];
   passedCandidates: readonly CandidateResult[];
+  nearestRejectedCandidate?: CandidateResult;
   totalCombinations: number;
   evaluatedCombinations: number;
   rejectedByValidation: number;
