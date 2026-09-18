@@ -95,6 +95,26 @@ function StatusPill({ status, reference = false }: { status: "pass" | "condition
   return <span className={`rounded-full px-2.5 py-1 text-xs font-bold ${reference ? "bg-violet-100 text-violet-700" : "bg-amber-100 text-amber-700"}`}>{reference ? "참고용 탈락" : "탈락"}</span>;
 }
 
+type ConditionState = "pass" | "fail" | "unset" | "not-applicable";
+
+function ConditionBadge({ label, state, detail }: { label: string; state: ConditionState; detail?: string }) {
+  const styles = state === "pass"
+    ? "border-emerald-200 bg-emerald-50 text-emerald-800"
+    : state === "fail"
+      ? "border-rose-200 bg-rose-50 text-rose-800"
+      : "border-slate-200 bg-slate-50 text-slate-600";
+  const stateLabel = state === "pass" ? "통과" : state === "fail" ? "초과" : state === "unset" ? "미입력" : "미적용";
+  return <div className={`rounded-xl border px-3 py-2 ${styles}`}><div className="flex items-center justify-between gap-2 text-xs"><span className="font-semibold">{label}</span><span className="font-bold">{stateLabel}</span></div>{detail ? <p className="mt-1 text-[11px] leading-4 opacity-80">{detail}</p> : null}</div>;
+}
+
+function CandidateConditionSummary({ candidate, config, targetThrustEnabled, automaticMode }: { candidate: CandidateResult; config: CandidateSearchConfig; targetThrustEnabled: boolean; automaticMode: boolean }) {
+  const massFailed = candidate.reasons.some((reason) => reason.includes("목표 연료 질량") || reason.includes("연료 질량 허용"));
+  const pressurePass = candidate.maximumPressureMpa <= config.maximumPressureMpa;
+  const thrustPass = targetThrustEnabled && Math.abs(candidate.averageThrustN - config.targetAverageThrustN) <= config.averageThrustToleranceN;
+  const burnPass = Math.abs(candidate.burnTimeSec - config.targetBurnTimeSec) <= config.burnTimeToleranceSec;
+  return <div className="mt-3 rounded-2xl border border-slate-200 bg-slate-50/80 p-3"><div className="flex flex-wrap items-center justify-between gap-2"><p className="text-xs font-bold text-slate-800">조건별 판정</p><StatusPill status={candidate.status} /></div><div className="mt-3 grid gap-2 sm:grid-cols-2 lg:grid-cols-4"><ConditionBadge label="질량 조건" state={massFailed ? "fail" : "pass"} detail={`${formatNumber(candidate.grainMassKg, 4)} / 목표 ${formatNumber(config.targetFuelMassKg, 4)} kg`} /><ConditionBadge label="압력 조건" state={pressurePass ? "pass" : "fail"} detail={pressurePass ? `${formatNumber(candidate.maximumPressureMpa, 4)} / 허용 ${formatNumber(config.maximumPressureMpa, 4)} MPa` : `압력 허용 범위 초과 · ${formatNumber(candidate.maximumPressureMpa, 4)} / 허용 ${formatNumber(config.maximumPressureMpa, 4)} MPa`} /><ConditionBadge label="목표 추력 조건" state={targetThrustEnabled ? (thrustPass ? "pass" : "fail") : "unset"} detail={targetThrustEnabled ? `${formatNumber(candidate.averageThrustN, 2)} / 목표 ${formatNumber(config.targetAverageThrustN, 2)} N` : "목표 추력이 입력되지 않았습니다."} /><ConditionBadge label="연소시간 조건" state={burnPass ? "pass" : "fail"} detail={`${formatNumber(candidate.burnTimeSec, 4)} / 목표 ${formatNumber(config.targetBurnTimeSec, 4)} s${automaticMode ? " · 자동 탐색에서는 판정 제외" : ""}`} /></div>{candidate.status === "conditional" ? <p className="mt-3 rounded-xl border border-cyan-200 bg-cyan-50 px-3 py-2 text-xs font-semibold leading-5 text-cyan-900">조건부 판정: 목표 추력 미입력 또는 자동 탐색의 연소시간 판정 제외 상태입니다. 추천 후보와 동일한 확정 판정이 아닙니다.</p> : candidate.reasons.length ? <p className="mt-3 rounded-xl border border-rose-200 bg-rose-50 px-3 py-2 text-xs font-semibold leading-5 text-rose-900">판정 사유: {candidate.reasons.join(" ")}</p> : null}</div>;
+}
+
 function SortHeader({ label, sortKey, activeKey, direction, onSort }: { label: string; sortKey: CandidateSortKey; activeKey: CandidateSortKey | null; direction: CandidateSortDirection | null; onSort: (key: CandidateSortKey) => void }) {
   const icon = activeKey === sortKey ? (direction === "asc" ? "↑" : "↓") : "↕";
   return <th className={`px-4 py-3 ${activeKey === sortKey ? "text-cyan-700" : ""}`}>
@@ -227,6 +247,8 @@ export default function Home() {
   const [progressText, setProgressText] = useState("");
   const [progressPercent, setProgressPercent] = useState(0);
   const [completedStage, setCompletedStage] = useState(0);
+  const [runningStage, setRunningStage] = useState<number | null>(null);
+  const [cancelled, setCancelled] = useState(false);
   const cancelRequested = useRef(false);
 
   const updateNumber = (key: keyof CandidateSearchConfig, value: number) => setConfig((current) => ({ ...current, [key]: value }));
@@ -246,9 +268,12 @@ export default function Home() {
     setProgressText("");
     setProgressPercent(0);
     setCompletedStage(0);
+    setRunningStage(null);
+    setCancelled(false);
   };
   const runSearch = async (stage = 3) => {
-    setCompletedStage(stage);
+    setRunningStage(stage);
+    setCancelled(false);
     cancelRequested.current = false;
     setSearch(null);
     setSelected(null);
@@ -274,8 +299,12 @@ export default function Home() {
           setProgressPercent(total === 0 ? 100 : (completed / total) * 100);
         },
       });
-      if (cancelRequested.current) return;
+      if (cancelRequested.current) {
+        setCancelled(true);
+        return;
+      }
       setSearch(result);
+      setCompletedStage(stage);
       setSelected(result.candidates.find((candidate) => candidate.status !== "fail") ?? null);
       setSortKey(null);
       setSortDirection(null);
@@ -287,6 +316,7 @@ export default function Home() {
       setSelected(null);
     } finally {
       setRunning(false);
+      setRunningStage(null);
       setProgressText("");
       setProgressPercent(0);
     }
@@ -477,7 +507,7 @@ export default function Home() {
           </div>
 </div>
 <button type="button" onClick={() => runSearch(3)} disabled={running} className={`${automaticMode && mode !== "excel" ? "hidden" : "mt-6"} w-full rounded-xl bg-cyan-600 px-4 py-3 text-sm font-bold text-white shadow-lg shadow-cyan-600/20 transition hover:bg-cyan-700 disabled:cursor-wait disabled:opacity-60`}>{running ? "계산 중…" : mode === "excel" ? "Excel 재현 계산" : "상세 후보 탐색 실행"}</button>
-{running ? <div className="mt-3 rounded-2xl border-2 border-cyan-300 bg-cyan-50 px-3 py-3 text-xs text-cyan-950 shadow-sm"><div className="flex items-center justify-between gap-3"><span className="font-bold">계산 진행 중</span><span className="font-mono text-cyan-700">{Math.round(progressPercent)}%</span></div><div className="mt-2 h-2 overflow-hidden rounded-full bg-cyan-100"><div className="h-full rounded-full bg-cyan-600 transition-[width]" style={{ width: `${progressPercent}%` }} /></div><div className="mt-2 flex items-center justify-between gap-2"><span>{progressText}</span><button type="button" onClick={() => { cancelRequested.current = true; setProgressText("계산 취소 요청 중… 재계산할 수 있습니다."); }} className="rounded-lg bg-cyan-700 px-3 py-1.5 font-bold text-white shadow-sm hover:bg-cyan-800">계산 취소</button></div></div> : null}
+{running ? <div className="mt-3 rounded-2xl border-2 border-cyan-300 bg-cyan-50 px-3 py-3 text-xs text-cyan-950 shadow-sm"><div className="flex items-center justify-between gap-3"><span className="font-bold">실행 단계 {runningStage ?? "-"} / 3 · 계산 진행 중</span><span className="font-mono text-cyan-700">{Math.round(progressPercent)}%</span></div><div className="mt-2 h-2 overflow-hidden rounded-full bg-cyan-100"><div className="h-full rounded-full bg-cyan-600 transition-[width]" style={{ width: `${progressPercent}%` }} /></div><div className="mt-2 flex items-center justify-between gap-2"><span>{progressText}</span><button type="button" onClick={() => { cancelRequested.current = true; setProgressText("계산 취소 요청 중… 마지막 완료 단계로 돌아갑니다."); }} className="rounded-lg bg-cyan-700 px-3 py-1.5 font-bold text-white shadow-sm hover:bg-cyan-800">계산 취소</button></div></div> : cancelled ? <div className="mt-3 rounded-2xl border-2 border-amber-300 bg-amber-50 px-3 py-3 text-xs text-amber-950"><p className="font-bold">계산이 취소되었습니다.</p><p className="mt-1">마지막 완료 단계: {completedStage} / 3 · 입력을 확인한 뒤 다시 계산할 수 있습니다.</p></div> : null}
 <p className="mt-3 text-center text-[11px] text-slate-400">계산은 버튼을 누를 때 브라우저에서 실행됩니다.</p>
         </aside>
         <section className="min-w-0">{errorMessage ? <div className="mb-4 rounded-2xl border border-rose-200 bg-rose-50 px-4 py-3 text-sm leading-6 text-rose-800">
@@ -490,7 +520,7 @@ export default function Home() {
 <p className="mt-2 max-w-md text-sm leading-6 text-slate-500">기본 데모 입력은 KNSB coarse 기준 케이스입니다. 탐색을 실행하면 실제 Data and Kn → Pressure → Blowdown → Performance 결과가 표시됩니다.</p>
 </div>
 </div> : <div className="space-y-6">
-<div className="rounded-3xl border border-cyan-200 bg-gradient-to-br from-cyan-50 to-white p-4 shadow-sm sm:p-5"><div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between"><div><p className="text-xs font-bold uppercase tracking-[0.14em] text-cyan-700">현재 계산 요약</p><h2 className="mt-1 text-lg font-bold text-slate-950">목표와 탐색 상태를 한눈에 확인하세요</h2></div><span className="rounded-full bg-slate-900 px-3 py-1 text-xs font-bold text-white">단계 {completedStage}/3</span></div><div className="mt-4 grid grid-cols-2 gap-2 sm:grid-cols-4"><div className="rounded-2xl bg-white px-3 py-3 shadow-sm"><p className="text-[11px] font-semibold text-slate-500">목표 질량</p><p className="mt-1 text-base font-bold text-slate-950">{formatNumber(config.targetFuelMassKg, 4)} <span className="text-xs font-normal text-slate-500">kg</span></p></div><div className="rounded-2xl bg-white px-3 py-3 shadow-sm"><p className="text-[11px] font-semibold text-slate-500">최대 허용 압력</p><p className="mt-1 text-base font-bold text-slate-950">{formatNumber(config.maximumPressureMpa, 3)} <span className="text-xs font-normal text-slate-500">MPa</span></p></div><div className="rounded-2xl bg-white px-3 py-3 shadow-sm"><p className="text-[11px] font-semibold text-slate-500">목표 평균 추력</p><p className="mt-1 text-base font-bold text-slate-950">{targetThrustText.trim() === "" ? "미입력" : `${formatNumber(Number(targetThrustText), 2)} N`}</p></div><div className="rounded-2xl bg-white px-3 py-3 shadow-sm"><p className="text-[11px] font-semibold text-slate-500">자동 확장</p><p className="mt-1 text-base font-bold text-violet-700">{search ? `${search.automaticExpansionStage ?? 0}단계` : "대기"}</p></div></div></div>
+<div className="rounded-3xl border border-cyan-200 bg-gradient-to-br from-cyan-50 to-white p-4 shadow-sm sm:p-5"><div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between"><div><p className="text-xs font-bold uppercase tracking-[0.14em] text-cyan-700">현재 계산 요약</p><h2 className="mt-1 text-lg font-bold text-slate-950">목표와 탐색 상태를 한눈에 확인하세요</h2></div><span className="rounded-full bg-slate-900 px-3 py-1 text-xs font-bold text-white">UI 단계 {completedStage}/3</span></div><div className="mt-4 grid grid-cols-2 gap-2 sm:grid-cols-4"><div className="rounded-2xl bg-white px-3 py-3 shadow-sm"><p className="text-[11px] font-semibold text-slate-500">목표 질량</p><p className="mt-1 text-base font-bold text-slate-950">{formatNumber(config.targetFuelMassKg, 4)} <span className="text-xs font-normal text-slate-500">kg</span></p></div><div className="rounded-2xl bg-white px-3 py-3 shadow-sm"><p className="text-[11px] font-semibold text-slate-500">최대 허용 압력</p><p className="mt-1 text-base font-bold text-slate-950">{formatNumber(config.maximumPressureMpa, 3)} <span className="text-xs font-normal text-slate-500">MPa</span></p></div><div className="rounded-2xl bg-white px-3 py-3 shadow-sm"><p className="text-[11px] font-semibold text-slate-500">목표 평균 추력</p><p className="mt-1 text-base font-bold text-slate-950">{targetThrustText.trim() === "" ? "미입력" : `${formatNumber(Number(targetThrustText), 2)} N`}</p></div><div className="rounded-2xl bg-white px-3 py-3 shadow-sm"><p className="text-[11px] font-semibold text-slate-500">자동 확장 단계</p><p className="mt-1 text-base font-bold text-violet-700">{search ? `${search.automaticExpansionStage ?? 0}단계` : "대기"}</p></div></div><p className="mt-3 text-[11px] text-slate-600">UI 입력 단계는 질량 → 압력 → 최종 추천의 완료 상태이고, 자동 확장 단계는 탐색 범위 확장 횟수입니다.</p></div>
 <div className="flex flex-col gap-3 rounded-2xl border border-slate-200 bg-white px-5 py-4 shadow-sm sm:flex-row sm:items-center sm:justify-between">
 <div>
 <p className="text-sm font-bold text-slate-950">탐색 결과</p>
@@ -587,10 +617,10 @@ export default function Home() {
 <RecommendationRow label="제작 치수 간격" value={selectedRecommendation.dimensionsOnStep ? `${config.manufacturingStepMm ?? 5} mm 배수` : "간격 조건 확인 필요"} tone={selectedRecommendation.dimensionsOnStep ? "emerald" : "amber"} />
 <RecommendationRow label="판정 사유" value={selected.status === "pass" ? "모든 목표 허용 범위 통과" : selected.reasons.join(" ")} tone={selected.status === "pass" ? "emerald" : "amber"} />
 </ul>
-</div> : null}{selected.reasons.length ? <div className="rounded-2xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-800">
+</div> : null}<CandidateConditionSummary candidate={selected} config={config} targetThrustEnabled={targetThrustText.trim() !== ""} automaticMode={automaticMode} />{selected.reasons.length ? <div className="rounded-2xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-800">
 <p className="font-bold">탈락·경고 사유</p>
 <ul className="mt-1 list-disc pl-5">{selected.reasons.map((reason) => <li key={reason}>{reason}</li>)}</ul>
-</div> : <div className="rounded-2xl border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm text-emerald-800">모든 목표 허용 범위를 만족한 후보입니다.</div>}{selectedCharts ? <div className="grid gap-4 2xl:grid-cols-2">
+</div> : selected.status === "pass" ? <div className="rounded-2xl border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm text-emerald-800">모든 목표 허용 범위를 만족한 후보입니다.</div> : null}{selectedCharts ? <div className="grid gap-4 2xl:grid-cols-2">
 <div>
 <h3 className="mb-2 text-sm font-bold text-slate-950">추력 · 시간</h3>
 <GraphKpis items={selectedCharts.thrustKpis} />
