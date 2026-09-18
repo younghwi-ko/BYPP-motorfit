@@ -1,6 +1,8 @@
 export interface BisectionOptions {
   lower: number;
   upper: number;
+  initialGuess?: number;
+  functionTolerance?: number;
   tolerance?: number;
   maxIterations?: number;
 }
@@ -14,7 +16,14 @@ export interface BisectionResult {
 /** A deterministic bracketed solver, independent of the combustion model. */
 export function solveBisection(
   evaluate: (value: number) => number,
-  { lower, upper, tolerance = 1e-15, maxIterations = 128 }: BisectionOptions,
+  {
+    lower,
+    upper,
+    initialGuess,
+    functionTolerance = 0,
+    tolerance = 1e-15,
+    maxIterations = 128,
+  }: BisectionOptions,
 ): BisectionResult {
   let low = lower;
   let high = upper;
@@ -30,13 +39,29 @@ export function solveBisection(
     throw new RangeError("Bisection interval does not bracket a root.");
   }
 
+  if (initialGuess !== undefined) {
+    if (initialGuess < lower || initialGuess > upper) {
+      throw new RangeError("Bisection initial guess must lie inside the bracket.");
+    }
+    const initialResidual = evaluate(initialGuess);
+    if (!Number.isFinite(initialResidual)) {
+      throw new RangeError("Bisection initial residual must be finite.");
+    }
+    if (Math.abs(initialResidual) <= functionTolerance) {
+      return { root: initialGuess, residual: initialResidual, iterations: 0 };
+    }
+  }
+
   let middle = low;
   let residual = lowValue;
   for (let iterations = 1; iterations <= maxIterations; iterations += 1) {
     middle = (low + high) / 2;
     residual = evaluate(middle);
     if (!Number.isFinite(residual)) throw new RangeError("Bisection residual must be finite.");
-    if (residual === 0 || (high - low) / 2 <= tolerance) {
+    if (
+      Math.abs(residual) <= functionTolerance ||
+      (high - low) / 2 <= tolerance
+    ) {
       return { root: middle, residual, iterations };
     }
     if (Math.sign(residual) === Math.sign(lowValue)) {

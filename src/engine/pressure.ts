@@ -227,6 +227,7 @@ export function calculateCombustionPressure(
     gasConstantJPerKgK,
     chamberTemperatureK,
     characteristicVelocityMPerSec,
+    atmosphericPressureMpa: settings.atmosphericPressureMpa,
     maximumGaugePressureMpa: Math.max(...rows.map((row) => row.gaugePressureMpa)),
     burnTimeSec: finalRow.timeSec,
     rows,

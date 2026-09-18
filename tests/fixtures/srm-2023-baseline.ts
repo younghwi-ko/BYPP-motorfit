@@ -86,4 +86,62 @@ export const SRM_2023_BASELINE_EXPECTED = {
       gaugePressureMpa: 3.48016100982087,
     },
   },
+  blowdown: {
+    timeIncrementSec: 0.00107301176250338,
+    goalSeekResidualMpa: -0.0000772754104348267,
+    thrustEndTimeSec: 2.22716310048255,
+    curveEndTimeSec: 2.228236112245053,
+    row863: {
+      timeSec: 2.1778045594073983,
+      absolutePressureMpa: 3.3689630034893847,
+      gaugePressureMpa: 3.2679630034893847,
+    },
+    row908: {
+      timeSec: 2.2260900887200465,
+      absolutePressureMpa: 0.21565224672190814,
+      gaugePressureMpa: 0.11465224672190813,
+    },
+    row909: {
+      timeSec: 2.22716310048255,
+      absolutePressureMpa: 0.202873995006947,
+      gaugePressureMpa: 0.101873995006947,
+    },
+    row910: {
+      timeSec: 2.228236112245053,
+      absolutePressureMpa: 0,
+      gaugePressureMpa: 0,
+    },
+  },
+  performance: {
+    initialExitMach: 2.8115374657521723,
+    exitMachResidual: -0.0001612994106832133,
+    maximumThrustN: 227.937080969097,
+    totalImpulseNs: 467.358495267894,
+    averageThrustN: 209.84475504584,
+    specificImpulseSec: 120.47543123978488,
+    motorClass: "I",
+    row29: {
+      exitPressurePa: 101000,
+      optimumExpansionRatio: 6.157072455848843,
+      thrustCoefficient: 1.3040531945561344,
+      thrustN: 199.77306946675972,
+      impulseIncrementNs: 0.5799146603169544,
+    },
+    row496: {
+      timeSec: 1.2262711511294588,
+      exitPressurePa: 112567.73422020632,
+      optimumExpansionRatio: 6.74026644946469,
+      thrustCoefficient: 1.322931960126077,
+      thrustN: 227.93708096909674,
+    },
+    row909: {
+      thrustCoefficient: 0.6253085593416964,
+      thrustN: 5.351171995231351,
+      impulseIncrementNs: 0.0060477629308454415,
+    },
+    row910: {
+      thrustN: 0,
+      impulseIncrementNs: 0.0028709352470307333,
+    },
+  },
 } as const;

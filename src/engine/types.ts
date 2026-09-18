@@ -138,9 +138,106 @@ export interface PressureCombustionResult {
   gasConstantJPerKgK: number;
   chamberTemperatureK: number;
   characteristicVelocityMPerSec: number;
+  atmosphericPressureMpa: number;
   maximumGaugePressureMpa: number;
   burnTimeSec: number;
   rows: readonly PressureCombustionRow[];
+}
+
+export interface BlowdownOptions {
+  timeIncrementSeedSec?: number;
+  maximumChange?: number;
+  maxIterations?: number;
+  percentOfMaximumPressure?: number;
+}
+
+export interface PressureBlowdownRow {
+  excelRow: number;
+  timeSec: number;
+  absolutePressureMpa: number;
+  gaugePressureMpa: number;
+  gaugePressurePsi: number;
+}
+
+export interface PressureBlowdownResult {
+  timeIncrementSec: number;
+  goalSeekResidualMpa: number;
+  solverIterations: number;
+  finalPressureTargetMpa: number;
+  thrustEndTimeSec: number;
+  curveEndTimeSec: number;
+  rows: readonly PressureBlowdownRow[];
+}
+
+export interface PressureResult {
+  combustion: PressureCombustionResult;
+  blowdown: PressureBlowdownResult;
+  maximumGaugePressureMpa: number;
+  burnTimeSec: number;
+  thrustEndTimeSec: number;
+}
+
+export interface PerformanceOptions {
+  nozzleEfficiency?: number;
+  initialExpansionRatio?: number;
+  exitMachSeed?: number;
+  maximumChange?: number;
+  maxIterations?: number;
+}
+
+export interface PerformanceRow {
+  excelRow: number;
+  chamberPressurePa: number;
+  throatAreaM2: number;
+  throatAreaMm2: number;
+  expansionRatio: number | null;
+  exitPressurePa: number;
+  optimumExpansionRatio: number;
+  thrustCoefficient: number;
+  thrustN: number;
+  thrustLbf: number;
+  timeSec: number;
+  impulseIncrementNs: number;
+  exitMach: number;
+}
+
+export interface PerformanceResult {
+  initialExitMach: number;
+  initialExitMachResidual: number;
+  finalExitMach: number;
+  finalExitMachResidual: number;
+  nozzleExitAreaMm2: number;
+  nozzleExitDiameterMm: number;
+  maximumOptimumExpansionRatio: number;
+  averageOptimumExpansionRatio: number;
+  webFraction: number;
+  maximumThrustCoefficient: number;
+  maximumThrustN: number;
+  totalImpulseNs: number;
+  averageThrustN: number;
+  specificImpulseSec: number;
+  motorClass: string;
+  thrustEndTimeSec: number;
+  rows: readonly PerformanceRow[];
+}
+
+export interface OutputThrustPoint {
+  dataPoint: number;
+  sourceExcelRow: number;
+  timeSec: number;
+  thrustN: number;
+  thrustLbf: number;
+}
+
+export interface MotorOutputResult {
+  grainMassKg: number;
+  totalImpulseNs: number;
+  averageThrustN: number;
+  maximumThrustN: number;
+  thrustTimeSec: number;
+  specificImpulseSec: number;
+  motorClass: string;
+  abbreviatedThrustCurve: readonly OutputThrustPoint[];
 }
 
 export interface ValidationIssue {
