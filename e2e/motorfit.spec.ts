@@ -90,3 +90,20 @@ test("AN 241개, 검색, 필터, 3개 비교, 내보내기", async ({ page }) =>
   expect(payload.input).toBeTruthy(); expect(payload.search).toBeTruthy(); expect(payload.referenceCandidate).toBeDefined();
   expect(payload.an.catalogSize).toBe(241); expect(payload.an.query).toBeDefined(); expect(payload.an.page).toBeDefined();
 });
+
+test("초보자 사용 설명서와 메인 화면 이동", async ({ page }) => {
+  await page.goto("/guide");
+  await expect(page.getByRole("heading", { name: "처음이라면, 이 순서로 보세요." })).toBeVisible();
+  await expect(page.getByText("3단계 빠른 시작")).toBeVisible();
+  await expect(page.getByText("전역 최적해를 보장하지 않습니다.")).toBeVisible();
+  await page.getByRole("link", { name: "계산 시작하기" }).click();
+  await expect(page.getByRole("heading", { name: "형상 후보를 계산하고 비교합니다." })).toBeVisible();
+  const guideLink = page.getByRole("link", { name: "사용 설명서 열기" });
+  await guideLink.focus();
+  await expect(guideLink).toBeFocused();
+  await page.setViewportSize({ width: 390, height: 844 });
+  await page.goto("/guide");
+  await expect(page.getByRole("heading", { name: "처음이라면, 이 순서로 보세요." })).toBeVisible();
+  await page.goto("/");
+  await expect(page.getByRole("link", { name: "사용 설명서 열기" })).toBeVisible();
+});

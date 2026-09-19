@@ -156,8 +156,8 @@ function MetricCard({ label, value, unit, tone = "slate" }: { label: string; val
   const tones = { slate: "border-slate-200 bg-white", cyan: "border-cyan-100 bg-cyan-50/70", amber: "border-amber-100 bg-amber-50/70" };
   return <div className={`rounded-2xl border p-4 ${tones[tone]}`}>
 <p className="text-xs font-semibold text-slate-500">{label}</p>
-<p className="mt-2 text-xl font-bold tracking-tight text-slate-950">{value}</p>
-<p className="mt-0.5 text-xs text-slate-500">{unit}</p>
+<p className="mt-2 font-mono text-xl font-black tracking-tight text-slate-950">{value}</p>
+<p className="mt-0.5 text-xs font-semibold text-slate-700">{unit}</p>
 </div>;
 }
 
@@ -243,7 +243,6 @@ export default function Home() {
   const [selected, setSelected] = useState<CandidateResult | null>(null);
   const [running, setRunning] = useState(false);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
-  const [guideOpen, setGuideOpen] = useState(false);
   const [sortKey, setSortKey] = useState<CandidateSortKey | null>(null);
   const [sortDirection, setSortDirection] = useState<CandidateSortDirection | null>(null);
   const [gsrmWallThicknessMm, setGsrmWallThicknessMm] = useState(DEFAULT_GSRM_WALL_THICKNESS_MM);
@@ -482,32 +481,10 @@ const requestCancel = () => { cancelRequested.current = true; searchWorker.curre
 <button type="button" onClick={resetToBaseline} className="rounded-full border border-slate-200 bg-white px-3 py-1.5 text-xs font-bold text-slate-600 transition hover:border-cyan-300 hover:text-cyan-700">기준 설계로 초기화</button>
 </div>
 </header>
-      <details open={guideOpen} onToggle={(event) => setGuideOpen(event.currentTarget.open)} className="mt-4 rounded-2xl border border-cyan-100 bg-cyan-50/70">
-<summary className="cursor-pointer list-none px-4 py-3 text-sm font-bold text-cyan-900">사용 설명서 <span className="ml-2 text-xs font-normal text-cyan-700">입력부터 설계 검토까지</span>
-</summary>
-<div className="grid gap-3 border-t border-cyan-100 px-4 py-4 text-sm text-cyan-950 sm:grid-cols-2 lg:grid-cols-5">
-<div>
-<p className="font-bold">1. 입력 조건 설정</p>
-<p className="mt-1 text-xs leading-5 text-cyan-800">챔버, 추진제, 형상 범위와 목표 허용 오차를 입력합니다.</p>
-</div>
-<div>
-<p className="font-bold">2. 후보 탐색</p>
-<p className="mt-1 text-xs leading-5 text-cyan-800">제작 후보 모드에서 5 mm 간격 조합을 계산합니다.</p>
-</div>
-<div>
-<p className="font-bold">3. 후보 선택</p>
-<p className="mt-1 text-xs leading-5 text-cyan-800">결과 표에서 후보를 선택하면 상세 카드가 열립니다.</p>
-</div>
-<div>
-<p className="font-bold">4. 그래프 확인</p>
-<p className="mt-1 text-xs leading-5 text-cyan-800">압력·추력·Kn 그래프로 계산 흐름을 확인합니다.</p>
-</div>
-<div>
-<p className="font-bold">5. 설계 검토</p>
-<p className="mt-1 text-xs leading-5 text-cyan-800">목표 오차와 압력 여유, 통과 사유를 함께 검토합니다.</p>
-</div>
-</div>
-</details>
+      <div className="mt-4 flex flex-col gap-3 rounded-2xl border-2 border-cyan-200 bg-cyan-50/70 px-4 py-3 sm:flex-row sm:items-center sm:justify-between">
+        <div><p className="text-sm font-black text-cyan-950">처음 사용하시나요?</p><p className="mt-1 text-xs leading-5 text-cyan-900">목표 질량과 압력을 입력한 뒤 3단계 계산 버튼을 순서대로 누르면 됩니다.</p></div>
+        <a href="/guide" className="inline-flex shrink-0 items-center justify-center rounded-xl bg-cyan-700 px-4 py-2.5 text-sm font-black text-white shadow-sm hover:bg-cyan-800 focus:outline-none focus:ring-2 focus:ring-cyan-500">사용 설명서 열기 →</a>
+      </div>
       <div className="mt-4 flex flex-wrap gap-2 text-xs font-semibold text-slate-600">
 <span className="rounded-full bg-emerald-100 px-3 py-1 text-emerald-700">구현 완료: Data and Kn</span>
 <span className="rounded-full bg-emerald-100 px-3 py-1 text-emerald-700">Pressure</span>
@@ -642,11 +619,11 @@ const requestCancel = () => { cancelRequested.current = true; searchWorker.curre
 <StatusPill status={candidate.status} reference={candidate === search.nearestRejectedCandidate} />
 </td>
 <td className="px-4 py-3 font-semibold text-slate-800">{candidate.input.grainOuterDiameterMm} × {candidate.input.grainCoreDiameterMm} × {candidate.input.segmentLengthMm} / {candidate.input.segmentCount}</td>
-<td className="px-4 py-3 text-slate-600">{formatNumber(candidate.grainMassKg, 4)} kg</td>
-<td className="px-4 py-3 text-slate-600">{formatNumber(candidate.maximumPressureMpa, 4)} MPa</td>
-<td className="px-4 py-3 text-slate-600">{formatNumber(candidate.burnTimeSec, 4)} s</td>
-<td className="px-4 py-3 text-slate-600">{formatNumber(candidate.averageThrustN, 2)} N</td>
-<td className="px-4 py-3 font-bold text-cyan-700">{formatNumber(candidate.score.totalScore, 1)}</td>
+<td className="px-4 py-3 font-mono font-semibold text-slate-900">{formatNumber(candidate.grainMassKg, 4)} <span className="font-sans text-xs text-slate-700">kg</span></td>
+<td className="px-4 py-3 font-mono font-semibold text-slate-900">{formatNumber(candidate.maximumPressureMpa, 4)} <span className="font-sans text-xs text-slate-700">MPa</span></td>
+<td className="px-4 py-3 font-mono font-semibold text-slate-900">{formatNumber(candidate.burnTimeSec, 4)} <span className="font-sans text-xs text-slate-700">s</span></td>
+<td className="px-4 py-3 font-mono font-semibold text-slate-900">{formatNumber(candidate.averageThrustN, 2)} <span className="font-sans text-xs text-slate-700">N</span></td>
+<td className="px-4 py-3 font-mono font-black text-cyan-800">{formatNumber(candidate.score.totalScore, 1)}</td>
 <td className="px-4 py-3"><button type="button" aria-label="비교 후보 선택" onClick={(event) => { event.stopPropagation(); toggleComparison(candidate); }} className="rounded-lg border border-cyan-300 px-2 py-1 text-[11px] font-bold text-cyan-800 focus:outline-none focus:ring-2 focus:ring-cyan-500">{comparison.some((item) => item === candidate) ? "해제" : "비교"}</button></td>
 </tr>)}</tbody>
 </table>
