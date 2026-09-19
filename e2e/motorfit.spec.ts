@@ -89,6 +89,7 @@ test("AN 241개, 검색, 필터, 3개 비교, 내보내기", async ({ page }) =>
   const payload = JSON.parse(await readFile(jsonPath!, "utf8"));
   expect(payload.input).toBeTruthy(); expect(payload.search).toBeTruthy(); expect(payload.referenceCandidate).toBeDefined();
   expect(payload.an.catalogSize).toBe(241); expect(payload.an.query).toBeDefined(); expect(payload.an.page).toBeDefined(); expect(payload.referenceRule).toContain("추천·조건부"); expect((await readFile(csvPath!, "utf8")).length).toBeGreaterThan(100);
+  expect(payload.input.fuelMassToleranceDisplay).toBe("0.010 kg"); expect(payload.search.counts.referenceRejected).toBe(0); expect(payload.representativeCandidate).toBeDefined();
 });
 
 test("초보자 사용 설명서와 메인 화면 이동", async ({ page }) => {
@@ -124,6 +125,17 @@ test("후보 유형별 상세보기와 비교 선택 분리", async ({ page }) =
   await comparisonButton.click();
   await expect(page.getByText(/선택 후보 비교 \(1\/3\)/)).toBeVisible();
   await expect(page.getByText(/추천 후보 상세|조건부 후보 상세|탈락 후보 상세|참고용 탈락 후보 상세/)).toBeVisible();
+});
+
+test("참고용 탈락 후보 집계와 카드 표시가 동일한 규칙을 따른다", async ({ page }) => {
+  await page.addInitScript(() => localStorage.clear()); await page.goto("/"); await page.waitForTimeout(1000);
+  await calculate(page, "0.763", "3.8", "310");
+  await expect(page.getByText(/^참고용 탈락 1$/)).toBeVisible();
+  await expect(page.getByText("참고용 탈락 후보", { exact: true }).last()).toBeVisible();
+  await expect(page.getByTestId("representative-candidate").getByText(/0\.7572/)).toBeVisible();
+  await calculate(page, "2.000", "4.0", "");
+  await expect(page.getByText(/^참고용 탈락 0$/)).toBeVisible();
+  await expect(page.getByText("참고용 탈락 후보", { exact: true })).toHaveCount(0);
 });
 
 test("2.000 kg 기본 질량 허용 오차 분류와 상세보기", async ({ page }) => {

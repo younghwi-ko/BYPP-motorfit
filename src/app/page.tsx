@@ -397,18 +397,18 @@ const requestCancel = () => { cancelRequested.current = true; searchWorker.curre
   };
   const sortedCandidates = useMemo(() => search ? sortCandidates(search.candidates, sortKey, sortDirection) : [], [search, sortDirection, sortKey]);
   const visibleCandidates = useMemo(() => sortedCandidates.filter((candidate) => statusFilters.includes(candidate.status)), [sortedCandidates, statusFilters]);
-  const candidateCounts = useMemo(() => search ? {
-    pass: search.candidates.filter((candidate) => candidate.status === "pass").length,
-    conditional: search.candidates.filter((candidate) => candidate.status === "conditional").length,
-    fail: search.candidates.filter((candidate) => candidate.status === "fail").length,
-  } : { pass: 0, conditional: 0, fail: 0 }, [search]);
   const closestFailedCandidate = useMemo(() => {
     return search?.nearestRejectedCandidate ?? null;
   }, [search]);
   const hasValidCandidate = Boolean(search?.candidates.some((candidate) => candidate.status !== "fail"));
+  const referenceCandidate = !hasValidCandidate ? closestFailedCandidate : null;
+  const candidateCounts = useMemo(() => search ? {
+    pass: search.candidates.filter((candidate) => candidate.status === "pass").length,
+    conditional: search.candidates.filter((candidate) => candidate.status === "conditional").length,
+    fail: search.candidates.filter((candidate) => candidate.status === "fail" && candidate !== referenceCandidate).length,
+  } : { pass: 0, conditional: 0, fail: 0 }, [referenceCandidate, search]);
   const hasPassCandidate = candidateCounts.pass > 0;
   const conditionalCandidate = search?.candidates.find((candidate) => candidate.status === "conditional") ?? null;
-  const referenceCandidate = !hasValidCandidate ? closestFailedCandidate : null;
   const isReferenceCandidate = Boolean(selected && referenceCandidate === selected);
   const selectedDetailTitle = selected
     ? isReferenceCandidate ? "참고용 탈락 후보 상세" : selected.status === "pass" ? "추천 후보 상세" : selected.status === "conditional" ? "조건부 후보 상세" : "탈락 후보 상세"
@@ -418,7 +418,8 @@ const requestCancel = () => { cancelRequested.current = true; searchWorker.curre
   const downloadExport = (format: "csv" | "json") => {
     if (!search) return;
     const rows = search.candidates.map((candidate) => ({ status: candidate.status, geometry: `${candidate.input.grainOuterDiameterMm}×${candidate.input.grainCoreDiameterMm}×${candidate.input.segmentLengthMm}/${candidate.input.segmentCount}`, massKg: candidate.grainMassKg, maximumPressureMpa: candidate.maximumPressureMpa, burnTimeSec: candidate.burnTimeSec, averageThrustN: candidate.averageThrustN, reasons: candidate.reasons.join(" ") }));
-    const payload = { exportedAt: new Date().toISOString(), input: { ...config, targetThrustText, targetThrustEnabled: targetThrustText.trim() !== "" }, search: { totalCombinations: search.totalCombinations, evaluatedCombinations: search.evaluatedCombinations, automaticExpansionStage: search.automaticExpansionStage ?? 0, searchEnvelope: search.searchEnvelope, warning: search.warning, diagnosis: search.diagnosis }, candidates: rows, selectedCandidates: comparison.map((candidate) => rows[search.candidates.indexOf(candidate)]), referenceCandidate: referenceCandidate ? rows[search.candidates.indexOf(referenceCandidate)] : null, referenceRule: "추천·조건부 후보가 없을 때만 목표 질량에 가장 가까운 탈락 후보 1개를 참고용으로 표시", gsrm: selected ? { referenceDiameterMm: gsrmReferenceDiameterMm, note: "선택 후보의 GSRM B 변환값. AN 검사는 화면에서 실행한 결과를 기준으로 합니다." } : null, an: anExportState ? { catalogSize: anExportState.total, query: anExportState.query, page: anExportState.page, pageCount: anExportState.pageCount, recommend: anExportState.recommend, conditional: anExportState.conditional, fail: anExportState.fail } : { catalogSize: 241, query: "미실행", page: 0, pageCount: 0, recommend: 0, conditional: 0, fail: 0 } };
+    const representative = selected ?? referenceCandidate;
+    const payload = { exportedAt: new Date().toISOString(), input: { ...config, fuelMassToleranceDisplay: formatMassTolerance(config.fuelMassToleranceKg), targetThrustText, targetThrustEnabled: targetThrustText.trim() !== "" }, search: { totalCombinations: search.totalCombinations, evaluatedCombinations: search.evaluatedCombinations, automaticExpansionStage: search.automaticExpansionStage ?? 0, searchEnvelope: search.searchEnvelope, warning: search.warning, diagnosis: search.diagnosis, counts: { recommend: candidateCounts.pass, conditional: candidateCounts.conditional, referenceRejected: referenceCandidate ? 1 : 0, rejected: candidateCounts.fail } }, candidates: rows, representativeCandidate: representative ? rows[search.candidates.indexOf(representative)] : null, selectedCandidates: comparison.map((candidate) => rows[search.candidates.indexOf(candidate)]), referenceCandidate: referenceCandidate ? rows[search.candidates.indexOf(referenceCandidate)] : null, referenceRule: "추천·조건부 후보가 없을 때만 목표 질량에 가장 가까운 탈락 후보 1개를 참고용으로 표시", gsrm: selected ? { referenceDiameterMm: gsrmReferenceDiameterMm, note: "선택 후보의 GSRM B 변환값. AN 검사는 화면에서 실행한 결과를 기준으로 합니다." } : null, an: anExportState ? { catalogSize: anExportState.total, query: anExportState.query, page: anExportState.page, pageCount: anExportState.pageCount, recommend: anExportState.recommend, conditional: anExportState.conditional, fail: anExportState.fail } : { catalogSize: 241, query: "미실행", page: 0, pageCount: 0, recommend: 0, conditional: 0, fail: 0 } };
     const csvValue = (value: unknown) => JSON.stringify(value ?? "");
     const csvLines = [
       "# MotorFit export",
