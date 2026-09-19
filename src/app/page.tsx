@@ -11,6 +11,7 @@ import type {
   CandidateSearchConfig,
   CandidateSearchResult,
 } from "../engine";
+import { DEMO_INPUT } from "./demo-config";
 
 const DEFAULT_FUEL_MASS_TOLERANCE_KG = 0.010;
 
@@ -19,9 +20,9 @@ const DEFAULT_CONFIG: CandidateSearchConfig = {
   chamberDiameterMm: 45,
   chamberLengthMm: 165,
   propellant: "KNSB coarse",
-  targetFuelMassKg: 0.3956,
+  targetFuelMassKg: DEMO_INPUT.targetFuelMassKg,
   fuelMassToleranceKg: DEFAULT_FUEL_MASS_TOLERANCE_KG,
-  maximumPressureMpa: 4.1,
+  maximumPressureMpa: DEMO_INPUT.maximumPressureMpa,
   targetAverageThrustN: 209.845,
   targetThrustEnabled: false,
   averageThrustToleranceN: 5,
@@ -405,7 +406,10 @@ const requestCancel = () => { cancelRequested.current = true; searchWorker.curre
     return search?.nearestRejectedCandidate ?? null;
   }, [search]);
   const hasValidCandidate = Boolean(search?.candidates.some((candidate) => candidate.status !== "fail"));
-  const isReferenceCandidate = Boolean(selected && closestFailedCandidate === selected && !hasValidCandidate);
+  const hasPassCandidate = candidateCounts.pass > 0;
+  const conditionalCandidate = search?.candidates.find((candidate) => candidate.status === "conditional") ?? null;
+  const referenceCandidate = !hasValidCandidate ? closestFailedCandidate : null;
+  const isReferenceCandidate = Boolean(selected && referenceCandidate === selected);
   const selectedDetailTitle = selected
     ? isReferenceCandidate ? "참고용 탈락 후보 상세" : selected.status === "pass" ? "추천 후보 상세" : selected.status === "conditional" ? "조건부 후보 상세" : "탈락 후보 상세"
     : "후보 상세";
@@ -414,7 +418,7 @@ const requestCancel = () => { cancelRequested.current = true; searchWorker.curre
   const downloadExport = (format: "csv" | "json") => {
     if (!search) return;
     const rows = search.candidates.map((candidate) => ({ status: candidate.status, geometry: `${candidate.input.grainOuterDiameterMm}×${candidate.input.grainCoreDiameterMm}×${candidate.input.segmentLengthMm}/${candidate.input.segmentCount}`, massKg: candidate.grainMassKg, maximumPressureMpa: candidate.maximumPressureMpa, burnTimeSec: candidate.burnTimeSec, averageThrustN: candidate.averageThrustN, reasons: candidate.reasons.join(" ") }));
-    const payload = { exportedAt: new Date().toISOString(), input: { ...config, targetThrustText, targetThrustEnabled: targetThrustText.trim() !== "" }, search: { totalCombinations: search.totalCombinations, evaluatedCombinations: search.evaluatedCombinations, automaticExpansionStage: search.automaticExpansionStage ?? 0, searchEnvelope: search.searchEnvelope, warning: search.warning, diagnosis: search.diagnosis }, candidates: rows, selectedCandidates: comparison.map((candidate) => rows[search.candidates.indexOf(candidate)]), referenceCandidate: closestFailedCandidate ? rows[search.candidates.indexOf(closestFailedCandidate)] : null, gsrm: selected ? { referenceDiameterMm: gsrmReferenceDiameterMm, note: "선택 후보의 GSRM B 변환값. AN 검사는 화면에서 실행한 결과를 기준으로 합니다." } : null, an: anExportState ? { catalogSize: anExportState.total, query: anExportState.query, page: anExportState.page, pageCount: anExportState.pageCount, recommend: anExportState.recommend, conditional: anExportState.conditional, fail: anExportState.fail } : { catalogSize: 241, query: "미실행", page: 0, pageCount: 0, recommend: 0, conditional: 0, fail: 0 } };
+    const payload = { exportedAt: new Date().toISOString(), input: { ...config, targetThrustText, targetThrustEnabled: targetThrustText.trim() !== "" }, search: { totalCombinations: search.totalCombinations, evaluatedCombinations: search.evaluatedCombinations, automaticExpansionStage: search.automaticExpansionStage ?? 0, searchEnvelope: search.searchEnvelope, warning: search.warning, diagnosis: search.diagnosis }, candidates: rows, selectedCandidates: comparison.map((candidate) => rows[search.candidates.indexOf(candidate)]), referenceCandidate: referenceCandidate ? rows[search.candidates.indexOf(referenceCandidate)] : null, referenceRule: "추천·조건부 후보가 없을 때만 목표 질량에 가장 가까운 탈락 후보 1개를 참고용으로 표시", gsrm: selected ? { referenceDiameterMm: gsrmReferenceDiameterMm, note: "선택 후보의 GSRM B 변환값. AN 검사는 화면에서 실행한 결과를 기준으로 합니다." } : null, an: anExportState ? { catalogSize: anExportState.total, query: anExportState.query, page: anExportState.page, pageCount: anExportState.pageCount, recommend: anExportState.recommend, conditional: anExportState.conditional, fail: anExportState.fail } : { catalogSize: 241, query: "미실행", page: 0, pageCount: 0, recommend: 0, conditional: 0, fail: 0 } };
     const csvValue = (value: unknown) => JSON.stringify(value ?? "");
     const csvLines = [
       "# MotorFit export",
@@ -572,15 +576,15 @@ const requestCancel = () => { cancelRequested.current = true; searchWorker.curre
 </div>
 </div>
             <div className="border-t border-slate-100 pt-5">
-<p className="mb-3 text-sm font-bold text-slate-950">목표와 허용 오차</p>
+<p className="mb-3 text-sm font-bold text-slate-950">검색 조건 입력과 허용 오차</p>
 <div className="grid grid-cols-2 gap-3">
 <Field label="목표 연료 질량" value={config.targetFuelMassKg} onChange={(value) => updateNumber("targetFuelMassKg", value)} suffix="kg" />
 <Field label="질량 허용 오차" value={config.fuelMassToleranceKg} onChange={(value) => updateNumber("fuelMassToleranceKg", value)} suffix="kg" />
 <Field label="최대 허용 압력" value={config.maximumPressureMpa} onChange={(value) => updateNumber("maximumPressureMpa", value)} suffix="MPa" />
 <Field label="목표 압력" value={config.targetPressureMpa} onChange={(value) => updateNumber("targetPressureMpa", value)} suffix="MPa" />
-<Field label="목표 평균 추력" value={config.targetAverageThrustN} onChange={(value) => updateNumber("targetAverageThrustN", value)} suffix="N" />
+<OptionalField label="목표 평균 추력" value={targetThrustText} onChange={setTargetThrustText} suffix="N" />
 <Field label="추력 허용 오차" value={config.averageThrustToleranceN} onChange={(value) => updateNumber("averageThrustToleranceN", value)} suffix="N" />
-<Field label="목표 연소 시간" value={config.targetBurnTimeSec} onChange={(value) => updateNumber("targetBurnTimeSec", value)} suffix="s" />
+<Field label="목표 연소 시간 (선택 조건)" value={config.targetBurnTimeSec} onChange={(value) => updateNumber("targetBurnTimeSec", value)} suffix="s" />
 <Field label="시간 허용 오차" value={config.burnTimeToleranceSec} onChange={(value) => updateNumber("burnTimeToleranceSec", value)} suffix="s" />
 </div>
 </div>
@@ -615,12 +619,13 @@ const requestCancel = () => { cancelRequested.current = true; searchWorker.curre
 <div className="flex flex-wrap gap-2 text-xs">
 <span className="rounded-full bg-emerald-100 px-2.5 py-1 font-bold text-emerald-700">추천 {candidateCounts.pass}</span>
 <span className="rounded-full bg-cyan-100 px-2.5 py-1 font-bold text-cyan-700">조건부 {candidateCounts.conditional}</span>
-<span className="rounded-full bg-violet-100 px-2.5 py-1 font-bold text-violet-700">참고용 탈락 {search.nearestRejectedCandidate ? 1 : 0}</span>
+<span className="rounded-full bg-violet-100 px-2.5 py-1 font-bold text-violet-700">참고용 탈락 {referenceCandidate ? 1 : 0}</span>
 <span className="rounded-full bg-amber-100 px-2.5 py-1 font-bold text-amber-700">탈락 {candidateCounts.fail}</span>
 </div>
 </div>
 {(selected ?? closestFailedCandidate) ? <div data-testid="representative-candidate" className="rounded-2xl border-2 border-cyan-200 bg-white p-4 shadow-sm"><div className="flex flex-wrap items-center justify-between gap-2"><div><p className="text-xs font-bold uppercase tracking-[0.14em] text-cyan-700">대표 후보 요약</p><p className="mt-1 text-lg font-bold text-slate-950">{(selected ?? closestFailedCandidate)!.input.grainOuterDiameterMm} × {(selected ?? closestFailedCandidate)!.input.grainCoreDiameterMm} × {(selected ?? closestFailedCandidate)!.input.segmentLengthMm} / {(selected ?? closestFailedCandidate)!.input.segmentCount}</p></div><StatusPill status={(selected ?? closestFailedCandidate)!.status} reference={!hasValidCandidate} /></div><div className="mt-3 grid grid-cols-2 gap-2 text-xs sm:grid-cols-4"><span className="rounded-xl bg-slate-50 px-3 py-2"><strong className="block text-slate-500">질량</strong><b className="font-mono text-slate-950">{formatNumber((selected ?? closestFailedCandidate)!.grainMassKg, 4)} kg</b></span><span className="rounded-xl bg-slate-50 px-3 py-2"><strong className="block text-slate-500">최대 압력</strong><b className="font-mono text-slate-950">{formatNumber((selected ?? closestFailedCandidate)!.maximumPressureMpa, 4)} MPa</b></span><span className="rounded-xl bg-slate-50 px-3 py-2"><strong className="block text-slate-500">연소 시간</strong><b className="font-mono text-slate-950">{formatNumber((selected ?? closestFailedCandidate)!.burnTimeSec, 4)} s</b></span><span className="rounded-xl bg-slate-50 px-3 py-2"><strong className="block text-slate-500">평균 추력</strong><b className="font-mono text-slate-950">{formatNumber((selected ?? closestFailedCandidate)!.averageThrustN, 2)} N</b></span></div><p className="mt-3 text-xs leading-5 text-slate-600">판정 이유: {(selected ?? closestFailedCandidate)!.reasons.join(" ") || "모든 기본 조건을 충족했습니다."}</p><p className="mt-1 text-xs font-semibold text-cyan-800">다음 확인: {candidateNextCheck((selected ?? closestFailedCandidate)!)}</p>{!hasValidCandidate ? <p className="mt-2 rounded-lg bg-violet-50 px-3 py-2 text-xs font-semibold text-violet-900">추천 후보가 없어 목표 질량에 가장 가까운 탈락 후보를 참고용으로 표시합니다.</p> : null}</div> : null}
-<div className="rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 text-xs leading-5 text-slate-700" aria-label="후보 상태 정의"><p className="font-bold text-slate-900">후보 상태 정의</p><div className="mt-2 grid gap-2 sm:grid-cols-2"><span><b className="text-emerald-700">추천</b> · 질량·압력 등 기본 조건을 만족</span><span><b className="text-cyan-700">조건부</b> · 일부 조건 확인이 필요한 후보</span><span><b className="text-violet-700">참고용 탈락</b> · 추천이 아닌 가장 가까운 탈락 참고값</span><span><b className="text-amber-700">탈락</b> · 하나 이상의 조건을 초과</span></div></div>
+<div className="rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 text-xs leading-5 text-slate-700" aria-label="후보 상태 정의"><p className="font-bold text-slate-900">후보 상태 정의</p><div className="mt-2 grid gap-2 sm:grid-cols-2"><span><b className="text-emerald-700">추천</b> · 질량·압력 등 기본 조건을 만족</span><span><b className="text-cyan-700">조건부</b> · 일부 조건 확인이 필요한 후보</span><span><b className="text-violet-700">참고용 탈락</b> · 추천·조건부가 모두 없을 때만 가장 가까운 탈락 후보 1개를 참고로 표시</span><span><b className="text-amber-700">탈락</b> · 하나 이상의 조건을 초과</span></div></div>
+{search.candidates.length > 0 && !hasPassCandidate && candidateCounts.conditional > 0 ? <div className="rounded-2xl border-2 border-cyan-300 bg-cyan-50 px-4 py-4 text-sm leading-6 text-cyan-950"><p className="font-bold text-base">추천 후보 없음 · 조건부 후보를 확인하세요</p><p className="mt-1">조건부 후보는 추천으로 승격되지 않으며, 미충족 조건과 다음 확인 항목을 상세 보기에서 확인해야 합니다.</p><div className="mt-3 flex flex-wrap gap-2"><button type="button" onClick={() => conditionalCandidate && openCandidateDetails(conditionalCandidate)} className="rounded-lg bg-cyan-700 px-3 py-2 text-xs font-bold text-white">조건부 후보 상세 보기</button><button type="button" onClick={() => closestFailedCandidate && openCandidateDetails(closestFailedCandidate)} disabled={!closestFailedCandidate} className="rounded-lg border border-violet-300 bg-violet-50 px-3 py-2 text-xs font-bold text-violet-900 disabled:opacity-50">가장 가까운 후보 보기</button><button type="button" onClick={() => { setAutomaticMode(false); setDetailsOpen(true); }} className="rounded-lg border border-slate-300 bg-white px-3 py-2 text-xs font-bold text-slate-800">허용 오차 확인·상세 설정</button><button type="button" onClick={() => runSearch(3)} disabled={running} className="rounded-lg border border-cyan-400 bg-white px-3 py-2 text-xs font-bold text-cyan-900 disabled:opacity-50">현재 입력으로 재계산</button></div></div> : null}
 {search.candidates.length > 0 && !search.candidates.some((candidate) => candidate.status !== "fail") ? <div className="rounded-2xl border-2 border-amber-300 bg-amber-50 px-4 py-4 text-sm leading-6 text-amber-950"><p className="font-bold text-base">유효한 추천 후보 없음</p><p className="mt-1">추천·조건부 후보가 없어 참고용 탈락 후보만 표시합니다.</p><div className="mt-3 flex flex-wrap gap-2"><button type="button" onClick={() => { setAutomaticMode(false); setDetailsOpen(true); }} className="rounded-lg border border-amber-400 bg-white px-3 py-2 text-xs font-bold text-amber-900">허용 오차 조정</button><button type="button" onClick={() => closestFailedCandidate && openCandidateDetails(closestFailedCandidate)} disabled={!closestFailedCandidate} className="rounded-lg border border-violet-300 bg-violet-50 px-3 py-2 text-xs font-bold text-violet-900 disabled:opacity-50">가장 가까운 후보 보기</button><button type="button" onClick={() => { setAutomaticMode(false); setDetailsOpen(true); }} className="rounded-lg border border-slate-300 bg-white px-3 py-2 text-xs font-bold text-slate-800">상세 설정 열기</button><button type="button" onClick={() => runSearch(3)} disabled={running} className="rounded-lg bg-amber-700 px-3 py-2 text-xs font-bold text-white disabled:opacity-50">다시 계산</button></div></div> : null}{search.warning ? <div className="rounded-2xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-800">⚠ {search.warning}</div> : null}{search.candidates.length === 0 ? <div className="rounded-2xl border border-amber-200 bg-amber-50 px-4 py-4 text-sm leading-6 text-amber-900">
 <p className="font-bold">{search.diagnosis ?? "조건을 만족한 후보가 없습니다."}</p>
 <p className="mt-1">자동 탐색 범위, 질량 오차, 압력 제한과 목표 추력 조건을 확인하고 상세 설정에서 허용 오차를 조정해보세요.</p>
@@ -651,7 +656,7 @@ const requestCancel = () => { cancelRequested.current = true; searchWorker.curre
 </thead>
 <tbody className="divide-y divide-slate-100">{visibleCandidates.slice(0, 12).map((candidate) => <tr key={`${candidate.input.grainOuterDiameterMm}-${candidate.input.grainCoreDiameterMm}-${candidate.input.segmentLengthMm}-${candidate.input.segmentCount}`} onClick={() => { if (candidate.status !== "fail") setSelected(candidate); }} className={`transition ${candidate.status !== "fail" ? "cursor-pointer hover:bg-cyan-50" : "cursor-default opacity-75"} ${selected === candidate ? "bg-cyan-50" : ""}`}>
 <td className="px-4 py-3">
-<StatusPill status={candidate.status} reference={candidate === search.nearestRejectedCandidate} />
+<StatusPill status={candidate.status} reference={candidate === referenceCandidate} />
 </td>
 <td className="px-4 py-3 font-semibold text-slate-800">{candidate.input.grainOuterDiameterMm} × {candidate.input.grainCoreDiameterMm} × {candidate.input.segmentLengthMm} / {candidate.input.segmentCount}</td>
 <td className="px-4 py-3 font-mono font-semibold text-slate-900">{formatNumber(candidate.grainMassKg, 4)} <span className="font-sans text-xs text-slate-700">kg</span></td>
@@ -696,9 +701,9 @@ const requestCancel = () => { cancelRequested.current = true; searchWorker.curre
 <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
 <MetricCard label="연료 질량" value={formatNumber(selected.grainMassKg, 4)} unit="kg" tone="cyan" />
 <MetricCard label="최대 압력" value={formatNumber(selected.maximumPressureMpa, 4)} unit="MPa gauge" tone="amber" />
-<MetricCard label="평균 추력" value={formatNumber(selected.averageThrustN, 2)} unit="N" />
+<MetricCard label="계산 결과 · 평균 추력" value={formatNumber(selected.averageThrustN, 2)} unit="N" />
 <MetricCard label="총충격량" value={formatNumber(selected.totalImpulseNs, 2)} unit="N·s" />
-<MetricCard label="연소 시간" value={formatNumber(selected.burnTimeSec, 4)} unit="s" />
+<MetricCard label="계산 결과 · 연소 시간" value={formatNumber(selected.burnTimeSec, 4)} unit="s" />
 <MetricCard label="추력 종료" value={formatNumber(selected.thrustEndTimeSec, 4)} unit="s" />
 <MetricCard label="최대 추력" value={formatNumber(selected.maximumThrustN, 2)} unit="N" />
 <MetricCard label="비추력" value={formatNumber(selected.specificImpulseSec, 3)} unit="s" />

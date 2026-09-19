@@ -80,21 +80,23 @@ test("AN 241개, 검색, 필터, 3개 비교, 내보내기", async ({ page }) =>
   for (let i = 0; i < Math.min(3, await compareButtons.count()); i++) await compareButtons.nth(i).click();
   await expect(page.getByText(/선택 후보 비교 \(/)).toBeVisible();
   const download = page.waitForEvent("download"); await page.getByRole("button", { name: "CSV 내보내기" }).click();
-  const csvPath = await (await download).path(); expect(csvPath).toBeTruthy();
+  const csvEvent = await download; const csvPath = await csvEvent.path(); expect(csvPath).toBeTruthy(); expect(csvEvent.suggestedFilename()).toBe("motorfit-results.csv");
   const { readFile } = await import("node:fs/promises");
   const csv = await readFile(csvPath!, "utf8");
   expect(csv).toContain("targetThrustEnabled"); expect(csv).toContain("referenceCandidate"); expect(csv).toContain("AN");
   const jsonDownload = page.waitForEvent("download"); await page.getByRole("button", { name: "JSON 내보내기" }).click();
-  const jsonPath = await (await jsonDownload).path(); expect(jsonPath).toBeTruthy();
+  const jsonEvent = await jsonDownload; const jsonPath = await jsonEvent.path(); expect(jsonPath).toBeTruthy(); expect(jsonEvent.suggestedFilename()).toBe("motorfit-results.json");
   const payload = JSON.parse(await readFile(jsonPath!, "utf8"));
   expect(payload.input).toBeTruthy(); expect(payload.search).toBeTruthy(); expect(payload.referenceCandidate).toBeDefined();
-  expect(payload.an.catalogSize).toBe(241); expect(payload.an.query).toBeDefined(); expect(payload.an.page).toBeDefined();
+  expect(payload.an.catalogSize).toBe(241); expect(payload.an.query).toBeDefined(); expect(payload.an.page).toBeDefined(); expect(payload.referenceRule).toContain("추천·조건부"); expect((await readFile(csvPath!, "utf8")).length).toBeGreaterThan(100);
 });
 
 test("초보자 사용 설명서와 메인 화면 이동", async ({ page }) => {
   await page.goto("/guide");
   await expect(page.getByRole("heading", { name: "처음이라면, 이 순서로 보세요." })).toBeVisible();
   await expect(page.getByText("3단계 빠른 시작")).toBeVisible();
+  await expect(page.getByText(/0\.3956 kg/)).toBeVisible();
+  await expect(page.getByText(/목표 평균 추력 미입력/)).toBeVisible();
   await expect(page.getByText("전역 최적해를 보장하지 않습니다.")).toBeVisible();
   await page.getByRole("link", { name: "계산 시작하기" }).click();
   await expect(page.getByRole("heading", { name: "형상 후보를 계산하고 비교합니다." })).toBeVisible();
@@ -133,6 +135,20 @@ test("2.000 kg 기본 질량 허용 오차 분류와 상세보기", async ({ pag
   await expect(nearTargetRow.getByRole("status", { name: "조건부 후보" })).toBeVisible();
   await nearTargetRow.getByRole("button", { name: /상세 보기/ }).click();
   await expect(page.getByText("조건부 후보 상세", { exact: true })).toBeVisible();
+  await expect(page.getByRole("spinbutton", { name: "목표 평균 추력" })).toHaveValue("");
+  await expect(page.getByText("추천 후보 없음 · 조건부 후보를 확인하세요")).toBeVisible();
+  await expect(page.getByRole("button", { name: "조건부 후보 상세 보기" })).toBeVisible();
+});
+
+test("390px에서 후보 상세·비교·고급 영역을 직접 조작", async ({ page }) => {
+  await page.addInitScript(() => localStorage.clear()); await page.setViewportSize({ width: 390, height: 844 }); await page.goto("/"); await page.waitForTimeout(1000);
+  await calculate(page, "0.534", "4.0", "260");
+  await page.getByRole("button", { name: /상세 보기/ }).first().click();
+  await expect(page.getByText(/후보 상세/).first()).toBeVisible();
+  const compare = page.getByRole("button", { name: /비교에 추가|비교 후보 선택/ }).first(); await compare.click(); await expect(page.getByText(/선택 후보 비교 \(1\/3\)/)).toBeVisible(); await compare.click();
+  const advanced = page.getByText("고급 검증 · GSRM / AN 검사"); await advanced.click(); await advanced.click(); await expect(page.getByRole("button", { name: "AN 시리즈 전체 검사" })).toBeVisible();
+  await page.getByText("압력·추력·Kn 그래프").click(); await expect(page.getByText("추력 · 시간")).toBeVisible();
+  expect(await page.evaluate(() => document.documentElement.scrollWidth <= 390)).toBe(true);
 });
 
 test("질량 허용 오차 기본값과 저장값 마이그레이션", async ({ page }) => {

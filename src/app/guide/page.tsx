@@ -1,4 +1,5 @@
 import Link from "next/link";
+import { DEMO_INPUT } from "../demo-config";
 
 const steps = [
   { title: "1. 입력하기", body: "목표 질량(연료가 되길 바라는 양)과 최대 허용 압력을 입력하세요. 목표 평균 추력은 알고 있을 때만 입력하면 됩니다." },
@@ -29,7 +30,7 @@ export default function GuidePage() {
         <section className="mt-6" aria-labelledby="quick-start">
           <div className="flex items-end justify-between gap-3"><div><p className="text-xs font-bold uppercase tracking-[0.18em] text-cyan-700">Quick start</p><h2 id="quick-start" className="mt-1 text-2xl font-black">3단계 빠른 시작</h2></div><Link href="/" className="hidden rounded-xl bg-cyan-700 px-4 py-2 text-sm font-bold text-white hover:bg-cyan-800 focus:outline-none focus:ring-2 focus:ring-cyan-500 sm:inline-flex">계산 시작하기</Link></div>
           <div className="mt-4 grid gap-3 md:grid-cols-3">{steps.map((step) => <article key={step.title} className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm"><h3 className="text-lg font-black text-slate-950">{step.title}</h3><p className="mt-3 text-sm leading-6 text-slate-700">{step.body}</p></article>)}</div>
-          <div className="mt-4 rounded-2xl border border-cyan-200 bg-cyan-50 px-4 py-4 text-sm leading-6 text-cyan-950"><strong>기본 예시:</strong> 목표 질량 <b>0.534 kg</b> · 최대 허용 압력 <b>4.0 MPa</b> · 목표 평균 추력 <b>260 N</b>. 질량은 원하는 추진제 양, 압력은 넘지 않아야 할 상한, 추력은 원하는 힘을 뜻합니다.</div>
+          <div className="mt-4 rounded-2xl border border-cyan-200 bg-cyan-50 px-4 py-4 text-sm leading-6 text-cyan-950"><strong>기본 예시:</strong> 목표 질량 <b>{DEMO_INPUT.targetFuelMassKg.toFixed(4)} kg</b> · 최대 허용 압력 <b>{DEMO_INPUT.maximumPressureMpa.toFixed(1)} MPa</b> · 목표 평균 추력 <b>미입력</b>. 질량은 원하는 추진제 양, 압력은 넘지 않아야 할 상한, 추력은 알고 있을 때만 비교할 힘을 뜻합니다.</div>
         </section>
 
         <section className="mt-6 grid gap-6 lg:grid-cols-2" aria-label="입력과 결과 설명">
