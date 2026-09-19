@@ -90,6 +90,7 @@ test("AN 241개, 검색, 필터, 3개 비교, 내보내기", async ({ page }) =>
   expect(payload.input).toBeTruthy(); expect(payload.search).toBeTruthy(); expect(payload.referenceCandidate).toBeDefined();
   expect(payload.an.catalogSize).toBe(241); expect(payload.an.query).toBeDefined(); expect(payload.an.page).toBeDefined(); expect(payload.referenceRule).toContain("추천·조건부"); expect((await readFile(csvPath!, "utf8")).length).toBeGreaterThan(100);
   expect(payload.input.fuelMassToleranceDisplay).toBe("0.010 kg"); expect(payload.search.counts.referenceRejected).toBe(0); expect(payload.representativeCandidate).toBeDefined();
+  expect(payload.metadata.engineVersion).toBe("candidate-search-1"); expect(payload.metadata.status).toBe("completed"); expect(payload.metadata.anCatalogItemCount).toBe(241); expect(payload.metadata.calculatedAt).toBeTruthy();
 });
 
 test("초보자 사용 설명서와 메인 화면 이동", async ({ page }) => {

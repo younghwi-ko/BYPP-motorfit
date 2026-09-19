@@ -317,4 +317,25 @@ describe("automatic candidate envelope", () => {
     expect(asynchronous.candidates[0].averageThrustN).toBe(synchronous.candidates[0].averageThrustN);
     expect(asynchronous.evaluatedCombinations).toBe(synchronous.evaluatedCombinations);
   });
+
+  it("reproduces the same ordered candidates and metadata for identical input", () => {
+    const first = searchCandidates(createAutomaticCandidateSearchConfig({ ...BASE_CONFIG, targetFuelMassKg: 0.3956, fuelMassToleranceKg: 0.01, targetThrustEnabled: false }));
+    const second = searchCandidates(createAutomaticCandidateSearchConfig({ ...BASE_CONFIG, targetFuelMassKg: 0.3956, fuelMassToleranceKg: 0.01, targetThrustEnabled: false }));
+    const project = (result: typeof first) => ({
+      candidates: result.candidates.map((candidate) => ({ geometry: candidate.input, status: candidate.status, mass: candidate.grainMassKg, pressure: candidate.maximumPressureMpa })),
+      counts: { total: result.totalCombinations, evaluated: result.evaluatedCombinations, failures: result.calculationFailures, passed: result.passedCandidates.length, reference: result.passedCandidates.length === 0 ? result.nearestRejectedCandidate?.input ?? null : null },
+    });
+    expect(project(first)).toEqual(project(second));
+    expect(first.metadata?.engineVersion).toBe("candidate-search-1");
+    expect(first.metadata?.anCatalogItemCount).toBe(241);
+    expect(first.metadata?.status).toBe("completed");
+  });
+
+  it("keeps mass upper-bound and pressure boundary rules explicit", () => {
+    expect(isWithinMassUpperBound(1, 1)).toBe(true);
+    expect(isWithinMassUpperBound(1 + MASS_UPPER_EPSILON_KG, 1)).toBe(true);
+    expect(isWithinMassUpperBound(1 + MASS_UPPER_EPSILON_KG * 2, 1)).toBe(false);
+    const exactPressure = searchCandidates({ ...BASE_CONFIG, maximumPressureMpa: 5, targetThrustEnabled: false });
+    expect(exactPressure.candidates.every((candidate) => candidate.maximumPressureMpa <= 5 || candidate.status === "fail")).toBe(true);
+  });
 });

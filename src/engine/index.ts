@@ -50,6 +50,7 @@ export {
 } from "./validation";
 export { calculateTargetKn, TARGET_PRESSURE_OPTIONS_MPA } from "./data/target-kn";
 export { PROPELLANT_CONSTANTS, selectPropellantConstants } from "./data/propellants";
+export { APP_VERSION, CALCULATION_ENGINE_VERSION, BASELINE_VERSION, GSRM_REFERENCE_VERSION, AN_CATALOG_VERSION, AN_CATALOG_ITEM_COUNT } from "./metadata";
 export type {
   BurnAreaBreakdown,
   BurnRateCoefficients,
@@ -62,6 +63,7 @@ export type {
   CandidateSearchConfig,
   CandidateSearchProgress,
   CandidateSearchResult,
+  CalculationMetadata,
   DataAndKnInput,
   DataAndKnResult,
   KnCurvePoint,

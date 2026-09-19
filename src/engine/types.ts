@@ -352,6 +352,26 @@ export interface CandidateSearchResult {
     segmentLengthMm: CandidateNumberRange;
     segmentCount: CandidateNumberRange;
   };
+  metadata?: CalculationMetadata;
+}
+
+export interface CalculationMetadata {
+  appVersion: string;
+  engineVersion: string;
+  calculatedAt: string;
+  input: CandidateSearchConfig;
+  fuelMassToleranceKg: number;
+  searchMode: "candidate" | "excel";
+  automaticExpansionStage?: number;
+  totalCombinations: number;
+  evaluatedCombinations: number;
+  calculationFailures: number;
+  counts: { recommend: number; conditional: number; referenceRejected: number; rejected: number };
+  baselineVersion: string;
+  gsrmReferenceVersion: string;
+  anCatalogVersion: string;
+  anCatalogItemCount: number;
+  status: "completed" | "cancelled" | "failed";
 }
 
 export interface CandidateSearchProgress {

@@ -19,6 +19,9 @@ export function sortCandidates(candidates: readonly CandidateResult[], key: Cand
   const multiplier = direction === "asc" ? 1 : -1;
   return [...candidates].sort((left, right) => {
     const difference = valueFor(left, key) - valueFor(right, key);
-    return difference === 0 ? 0 : difference * multiplier;
+    if (difference !== 0) return difference * multiplier;
+    const leftGeometry = `${left.input.grainOuterDiameterMm}-${left.input.grainCoreDiameterMm}-${left.input.segmentLengthMm}-${left.input.segmentCount}`;
+    const rightGeometry = `${right.input.grainOuterDiameterMm}-${right.input.grainCoreDiameterMm}-${right.input.segmentLengthMm}-${right.input.segmentCount}`;
+    return leftGeometry.localeCompare(rightGeometry, "en", { numeric: true }) * multiplier;
   });
 }

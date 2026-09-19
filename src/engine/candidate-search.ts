@@ -17,6 +17,7 @@ import type {
   CandidateSearchResult,
   DataAndKnInput,
 } from "./types";
+import { AN_CATALOG_ITEM_COUNT, AN_CATALOG_VERSION, APP_VERSION, BASELINE_VERSION, CALCULATION_ENGINE_VERSION, GSRM_REFERENCE_VERSION } from "./metadata";
 
 const DEFAULT_MAX_CANDIDATES = 2_000;
 
@@ -297,6 +298,8 @@ function finishSearch(config: CandidateSearchConfig, prepared: PreparedSearch, c
     ? `${rangeSummary}. 자동 탐색 확장 ${config.automaticExpansionStage ?? 0}단계. 전체 후보 ${prepared.totalCombinations.toLocaleString()}개, 정밀 계산 전 형상 제외 ${prepared.prevalidationRejectedCount.toLocaleString()}개, 질량 상한 제외 ${prepared.massFilteredCount.toLocaleString()}개, 질량 계산 ${prepared.geometries.length.toLocaleString()}개, 정밀 계산 ${counters.evaluatedCombinations.toLocaleString()}개, 정밀 검증 탈락 ${counters.precisionValidationRejectedCount.toLocaleString()}개, 목표 질량 근처 후보 ${prepared.targetMassNearbyIncluded ? "포함" : "누락"}. 가장 가까운 질량 ${closestMassCandidate?.grainMassKg.toFixed(4) ?? "없음"} kg, 가장 가까운 추력 ${config.targetThrustEnabled === false ? "미입력" : `${closestThrustCandidate?.averageThrustN.toFixed(2) ?? "없음"} N`}. 중단 사유: ${automaticDiagnosis}.`
     : undefined;
   const partialWarning = "전체 조합 중 목표 질량 근처 일부 후보만 정밀 계산한 근사 추천이며, 전체 탐색 공간의 전역 최적해를 보장하지 않습니다.";
+  const referenceRejected = passedCandidates.length === 0 && nearestRejectedCandidate ? 1 : 0;
+  const rejected = candidates.filter((candidate) => candidate.status === "fail").length - referenceRejected;
   return {
     candidates, passedCandidates, nearestRejectedCandidate, totalCombinations: prepared.totalCombinations,
     evaluatedCombinations: counters.evaluatedCombinations,
@@ -312,6 +315,7 @@ function finishSearch(config: CandidateSearchConfig, prepared: PreparedSearch, c
     diagnosis: automaticDiagnosis,
     automaticExpansionStage: config.automaticExpansionStage,
     searchEnvelope: { chamberDiameterMm: config.chamberDiameterMm, chamberLengthMm: config.chamberLengthMm, outerDiameterMm: config.outerDiameterMm, coreDiameterMm: config.coreDiameterMm, segmentLengthMm: config.segmentLengthMm, segmentCount: config.segmentCount },
+    metadata: { appVersion: APP_VERSION, engineVersion: CALCULATION_ENGINE_VERSION, calculatedAt: new Date().toISOString(), input: { ...config }, fuelMassToleranceKg: config.fuelMassToleranceKg, searchMode: config.mode ?? "candidate", automaticExpansionStage: config.automaticExpansionStage, totalCombinations: prepared.totalCombinations, evaluatedCombinations: counters.evaluatedCombinations, calculationFailures: counters.calculationFailures, counts: { recommend: candidates.filter((candidate) => candidate.status === "pass").length, conditional: candidates.filter((candidate) => candidate.status === "conditional").length, referenceRejected, rejected }, baselineVersion: BASELINE_VERSION, gsrmReferenceVersion: GSRM_REFERENCE_VERSION, anCatalogVersion: AN_CATALOG_VERSION, anCatalogItemCount: AN_CATALOG_ITEM_COUNT, status: "completed" },
   };
 }
 
