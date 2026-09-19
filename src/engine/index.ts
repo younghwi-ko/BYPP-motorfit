@@ -50,7 +50,7 @@ export {
 } from "./validation";
 export { calculateTargetKn, TARGET_PRESSURE_OPTIONS_MPA } from "./data/target-kn";
 export { PROPELLANT_CONSTANTS, selectPropellantConstants } from "./data/propellants";
-export { APP_VERSION, CALCULATION_ENGINE_VERSION, BASELINE_VERSION, GSRM_REFERENCE_VERSION, AN_CATALOG_VERSION, AN_CATALOG_ITEM_COUNT } from "./metadata";
+export { APP_VERSION, CALCULATION_ENGINE_VERSION, BASELINE_VERSION, GSRM_REFERENCE_VERSION, AN_CATALOG_VERSION, AN_CATALOG_ITEM_COUNT, MODEL_VALIDATION_LEVEL, BASELINE_REPRODUCTION_STATUS, DETERMINISTIC_CALCULATION_STATUS, HARDWARE_VALIDATION_STATUS, PRODUCTION_APPROVAL_STATUS, VALIDATION_DATA_AVAILABLE, MODEL_ASSUMPTIONS, MODEL_LIMITATIONS } from "./metadata";
 export { VALIDATION_FIXTURES, createValidationSearchConfig } from "./validation-fixtures";
 export type { ValidationFixture } from "./validation-fixtures";
 export { validateFixture, notRunValidation } from "./validation-report";

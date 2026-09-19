@@ -91,8 +91,9 @@ test("AN 241개, 검색, 필터, 3개 비교, 내보내기", async ({ page }) =>
   expect(payload.an.catalogSize).toBe(241); expect(payload.an.query).toBeDefined(); expect(payload.an.page).toBeDefined(); expect(payload.referenceRule).toContain("추천·조건부"); expect((await readFile(csvPath!, "utf8")).length).toBeGreaterThan(100);
   expect(payload.input.fuelMassToleranceDisplay).toBe("0.010 kg"); expect(payload.search.counts.referenceRejected).toBe(0); expect(payload.representativeCandidate).toBeDefined();
   expect(payload.metadata.engineVersion).toBe("candidate-search-1"); expect(payload.metadata.status).toBe("completed"); expect(payload.metadata.anCatalogItemCount).toBe(241); expect(payload.metadata.calculatedAt).toBeTruthy();
+  expect(payload.modelValidationLevel).toContain("기준 모델"); expect(payload.baselineReproductionStatus).toBe("확인됨"); expect(payload.deterministicCalculationStatus).toBe("확인됨"); expect(payload.hardwareValidationStatus).toBe("확인되지 않음"); expect(payload.productionApprovalStatus).toBe("제공하지 않음"); expect(payload.validationDataAvailable).toBe(false); expect(payload.assumptions.length).toBeGreaterThan(0); expect(payload.limitations.length).toBeGreaterThan(0);
   expect(payload.validation.status).toBe("NOT_RUN"); expect(payload.validation.summary).toContain("실행하지 않음"); expect(payload.validation.baselineStatus).toBe("PASS"); expect(payload.validation.fixtures.length).toBeGreaterThan(0);
-  expect(csv).toContain("validation");
+  expect(csv).toContain("validation"); expect(csv).toContain("modelValidationLevel"); expect(csv).toContain("hardwareValidationStatus"); expect(csv).toContain("validationDataAvailable");
   await expect(page.getByText("설계 검토 리포트", { exact: true })).toBeVisible();
   await page.getByText("계산 결과 이력", { exact: true }).click();
   await page.getByLabel("저장 결과 이름").fill("배포 회귀 결과 A"); await page.getByRole("button", { name: "현재 결과 저장" }).click();
