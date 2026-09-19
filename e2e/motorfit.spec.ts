@@ -93,7 +93,7 @@ test("AN 241개, 검색, 필터, 3개 비교, 내보내기", async ({ page }) =>
   expect(payload.metadata.engineVersion).toBe("candidate-search-1"); expect(payload.metadata.status).toBe("completed"); expect(payload.metadata.anCatalogItemCount).toBe(241); expect(payload.metadata.calculatedAt).toBeTruthy();
   expect(payload.validation.status).toBe("NOT_RUN"); expect(payload.validation.summary).toContain("실행하지 않음"); expect(payload.validation.baselineStatus).toBe("PASS"); expect(payload.validation.fixtures.length).toBeGreaterThan(0);
   expect(csv).toContain("validation");
-  await expect(page.getByText("설계 검토 리포트")).toBeVisible();
+  await expect(page.getByText("설계 검토 리포트", { exact: true })).toBeVisible();
   await page.getByText("계산 결과 이력", { exact: true }).click();
   await page.getByLabel("저장 결과 이름").fill("배포 회귀 결과 A"); await page.getByRole("button", { name: "현재 결과 저장" }).click();
   await expect(page.getByText("“배포 회귀 결과 A” 결과를 저장했습니다.")).toBeVisible();
@@ -255,4 +255,19 @@ test("계산 결과 이력 JSON 백업·복원과 잘못된 파일 거부", asyn
   await expect(page.getByText("백업 원본").first()).toBeVisible();
   await fileInput.setInputFiles({ name: "invalid.json", mimeType: "application/json", buffer: Buffer.from("{broken") });
   await expect(page.getByText(/백업을 불러오지 않았습니다/)).toBeVisible();
+});
+
+test("설계 검토 리포트 인쇄와 저장 결과 리포트", async ({ page }) => {
+  await page.addInitScript(() => localStorage.clear());
+  await page.goto("/");
+  await page.waitForTimeout(1000);
+  await calculate(page, "0.3956", "4.1", "");
+  await page.getByRole("button", { name: /인쇄 \/ PDF로 저장 · 설계 검토 리포트/ }).click();
+  await expect(page.getByRole("button", { name: /인쇄 \/ PDF로 저장 · 설계 검토 리포트/ })).toBeVisible();
+  await page.getByText("계산 결과 이력", { exact: true }).click();
+  await page.getByLabel("저장 결과 이름").fill("리포트 저장 결과");
+  await page.getByRole("button", { name: "현재 결과 저장" }).click();
+  await page.getByLabel("리포트 저장 결과 선택").selectOption({ label: "리포트 저장 결과" });
+  await page.getByRole("button", { name: "인쇄 / PDF로 저장" }).last().click();
+  await expect(page.getByRole("button", { name: "인쇄 / PDF로 저장" }).last()).toBeVisible();
 });
