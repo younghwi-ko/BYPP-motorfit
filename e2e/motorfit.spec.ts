@@ -94,6 +94,7 @@ test("AN 241개, 검색, 필터, 3개 비교, 내보내기", async ({ page }) =>
   expect(payload.validation.status).toBe("NOT_RUN"); expect(payload.validation.summary).toContain("실행하지 않음"); expect(payload.validation.baselineStatus).toBe("PASS"); expect(payload.validation.fixtures.length).toBeGreaterThan(0);
   expect(csv).toContain("validation");
   await expect(page.getByText("설계 검토 리포트")).toBeVisible();
+  await page.getByText("계산 결과 이력", { exact: true }).click();
   await page.getByLabel("저장 결과 이름").fill("배포 회귀 결과 A"); await page.getByRole("button", { name: "현재 결과 저장" }).click();
   await expect(page.getByText("“배포 회귀 결과 A” 결과를 저장했습니다.")).toBeVisible();
   const history = await page.evaluate(() => JSON.parse(localStorage.getItem("motorfit-calculation-history-v1") ?? "[]"));
@@ -221,6 +222,37 @@ test("저장 이력 손상 복구", async ({ page }) => {
   });
   await page.goto("/");
   await page.getByRole("button", { name: "최종 추천 계산" }).click();
+  await page.getByText("계산 결과 이력", { exact: true }).click();
   await expect(page.getByText(/저장된 결과 데이터가 손상되어 무시했습니다/)).toBeVisible({ timeout: 120000 });
   expect(await page.evaluate(() => localStorage.getItem("motorfit-calculation-history-v1"))).toBe("[]");
+});
+
+test("계산 결과 이력 JSON 백업·복원과 잘못된 파일 거부", async ({ page }) => {
+  await page.addInitScript(() => localStorage.clear());
+  await page.goto("/");
+  await page.waitForTimeout(1000);
+  await calculate(page, "0.3956", "4.1", "");
+  await page.getByText("계산 결과 이력", { exact: true }).click();
+  await page.getByLabel("저장 결과 이름").fill("백업 원본");
+  await page.getByRole("button", { name: "현재 결과 저장" }).click();
+  const download = page.waitForEvent("download");
+  await page.getByRole("button", { name: "전체 이력 JSON 백업" }).click();
+  const backup = await download;
+  expect(backup.suggestedFilename()).toBe("motorfit-calculation-history-backup.json");
+  const backupPath = await backup.path();
+  expect(backupPath).toBeTruthy();
+  const { readFile } = await import("node:fs/promises");
+  const backupPayload = JSON.parse(await readFile(backupPath!, "utf8"));
+  expect(backupPayload.app).toBe("MotorFit");
+  expect(backupPayload.schemaVersion).toBe(1);
+  expect(backupPayload.results).toHaveLength(1);
+  await page.getByRole("button", { name: "삭제" }).click();
+  await expect(page.getByText("저장된 계산 결과가 없습니다.")).toBeVisible();
+  const fileInput = page.getByLabel("계산 결과 백업 파일 선택");
+  await fileInput.setInputFiles(backupPath!);
+  await expect(page.getByText(/백업 1개를 확인했습니다/)).toBeVisible();
+  await page.getByRole("button", { name: "기존 이력에 추가" }).click();
+  await expect(page.getByText("백업 원본").first()).toBeVisible();
+  await fileInput.setInputFiles({ name: "invalid.json", mimeType: "application/json", buffer: Buffer.from("{broken") });
+  await expect(page.getByText(/백업을 불러오지 않았습니다/)).toBeVisible();
 });

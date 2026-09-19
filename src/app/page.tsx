@@ -201,11 +201,34 @@ type SavedCalculation = {
   payload: Record<string, any>;
 };
 
+const SAVED_RESULTS_SCHEMA_VERSION = 1 as const;
+type SavedResultsBackup = {
+  app: "MotorFit";
+  schemaVersion: typeof SAVED_RESULTS_SCHEMA_VERSION;
+  exportedAt: string;
+  results: SavedCalculation[];
+};
+
 function createSavedCalculationId() { return `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`; }
 function createSavedCalculationTimestamp() { return new Date().toISOString(); }
 
 const SAVED_RESULTS_KEY = "motorfit-calculation-history-v1";
 const MAX_SAVED_RESULTS = 20;
+
+function isSavedCalculation(value: unknown): value is SavedCalculation {
+  if (!value || typeof value !== "object") return false;
+  const item = value as Partial<SavedCalculation>;
+  return typeof item.id === "string" && typeof item.name === "string" && typeof item.savedAt === "string" && Boolean(item.payload && typeof item.payload === "object");
+}
+
+function migrateBackup(value: unknown): SavedCalculation[] {
+  if (!value || typeof value !== "object") throw new Error("백업 형식이 올바르지 않습니다.");
+  const backup = value as Partial<SavedResultsBackup>;
+  if (backup.app !== "MotorFit") throw new Error("MotorFit 백업 파일이 아닙니다.");
+  if (backup.schemaVersion !== SAVED_RESULTS_SCHEMA_VERSION) throw new Error(`지원하지 않는 백업 schema version입니다: ${String(backup.schemaVersion ?? "없음")}`);
+  if (!Array.isArray(backup.results) || backup.results.some((item) => !isSavedCalculation(item))) throw new Error("저장 결과 항목이 올바르지 않습니다.");
+  return backup.results.slice(0, MAX_SAVED_RESULTS);
+}
 
 function AnCatalogPanel({ referenceDiameterMm, onStateChange }: { referenceDiameterMm: number; onStateChange?: (state: AnExportState) => void }) {
   const [results, setResults] = useState<GsrmBatchResult[] | null>(null);
@@ -323,6 +346,8 @@ export default function Home() {
   const [comparisonResultIds, setComparisonResultIds] = useState<[string, string]>(["", ""]);
   const [saveName, setSaveName] = useState("");
   const [historyNotice, setHistoryNotice] = useState<string | null>(null);
+  const [pendingImport, setPendingImport] = useState<{ results: SavedCalculation[]; versionMismatch: boolean } | null>(null);
+  const backupFileInput = useRef<HTMLInputElement | null>(null);
 const cancelRequested = useRef(false);
 const requestCancel = () => { cancelRequested.current = true; searchWorker.current?.postMessage({ type: "cancel" }); setProgressText("계산 취소 요청 중… 마지막 완료 단계로 돌아갑니다."); };
   const searchWorker = useRef<Worker | null>(null);
@@ -527,6 +552,35 @@ const requestCancel = () => { cancelRequested.current = true; searchWorker.curre
   const loadSavedResult = (item: SavedCalculation) => {
     setHistoryNotice(`“${item.name}”을(를) 읽었습니다. 저장 당시 결과는 비교·재내보내기용으로 보존되며 현재 계산을 덮어쓰지 않습니다.`);
   };
+  const exportHistoryBackup = () => {
+    const backup: SavedResultsBackup = { app: "MotorFit", schemaVersion: SAVED_RESULTS_SCHEMA_VERSION, exportedAt: createSavedCalculationTimestamp(), results: savedResults };
+    const blob = new Blob([JSON.stringify(backup, null, 2)], { type: "application/json" });
+    const url = URL.createObjectURL(blob); const anchor = document.createElement("a"); anchor.href = url; anchor.download = "motorfit-calculation-history-backup.json"; anchor.click(); URL.revokeObjectURL(url);
+    setHistoryNotice(`전체 이력 ${savedResults.length}개를 백업했습니다.`);
+  };
+  const inspectHistoryBackup = async (file: File) => {
+    try {
+      const parsed = JSON.parse(await file.text());
+      const imported = migrateBackup(parsed);
+      const versionMismatch = imported.some((item) => item.payload.metadata?.engineVersion !== CALCULATION_ENGINE_VERSION || item.payload.metadata?.appVersion !== APP_VERSION || item.payload.metadata?.baselineVersion !== BASELINE_VERSION || item.payload.metadata?.gsrmReferenceVersion !== GSRM_REFERENCE_VERSION || item.payload.metadata?.anCatalogVersion !== AN_CATALOG_VERSION);
+      setPendingImport({ results: imported, versionMismatch });
+      setHistoryNotice(`백업 ${imported.length}개를 확인했습니다. ${versionMismatch ? "일부 결과의 버전이 현재와 다릅니다. " : ""}추가 또는 전체 교체를 선택하세요.`);
+    } catch (error) {
+      setPendingImport(null);
+      setHistoryNotice(error instanceof Error ? `백업을 불러오지 않았습니다: ${error.message}` : "백업 파일을 불러오지 않았습니다.");
+    } finally {
+      if (backupFileInput.current) backupFileInput.current.value = "";
+    }
+  };
+  const applyHistoryImport = (replace: boolean) => {
+    if (!pendingImport) return;
+    const existingIds = new Set(savedResults.map((item) => item.id));
+    const imported = pendingImport.results.filter((item) => replace || !existingIds.has(item.id));
+    const next = (replace ? pendingImport.results : [...imported, ...savedResults]).slice(0, MAX_SAVED_RESULTS);
+    setSavedResults(next);
+    setPendingImport(null);
+    setHistoryNotice(`${replace ? "백업으로 교체" : "백업을 추가"}했습니다. ${next.length}개를 보관합니다.`);
+  };
   const toggleSort = (key: CandidateSortKey) => {
     if (sortKey !== key) {
       setSortKey(key);
@@ -730,7 +784,7 @@ const requestCancel = () => { cancelRequested.current = true; searchWorker.curre
 <p className="mt-1 text-slate-500">질량 오차와 압력 제한을 기본으로 평가하고, 목표 추력 입력 시 추력 곡선 오차를 추가합니다.</p>
 </div>
 <div className="rounded-2xl border border-cyan-100 bg-cyan-50/50 px-4 py-3"><div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between"><div><p className="font-bold text-slate-900">후보 필터·비교·내보내기</p><p className="mt-1 text-[11px] text-slate-600">상태 필터를 선택하고 후보 행의 비교 버튼으로 최대 3개까지 비교하세요.</p></div><div className="flex flex-wrap gap-2" role="group" aria-label="후보 상태 필터">{([['pass','추천'],['conditional','조건부'],['fail','탈락']] as const).map(([value,label]) => <label key={value} className="flex items-center gap-1 rounded-lg bg-white px-2 py-1.5 text-xs"><input type="checkbox" checked={statusFilters.includes(value)} onChange={() => setStatusFilters((current) => current.includes(value) ? current.filter((item) => item !== value) : [...current, value])} />{label}</label>)}</div><div className="flex gap-2"><button type="button" onClick={() => downloadExport("csv")} className="rounded-lg border border-cyan-300 bg-white px-3 py-1.5 text-xs font-bold text-cyan-800 focus:outline-none focus:ring-2 focus:ring-cyan-500">CSV 내보내기</button><button type="button" onClick={() => downloadExport("json")} className="rounded-lg bg-cyan-700 px-3 py-1.5 text-xs font-bold text-white focus:outline-none focus:ring-2 focus:ring-cyan-500">JSON 내보내기</button></div></div><p className="mt-2 text-[11px] text-slate-600">현재 표시 후보 {visibleCandidates.length.toLocaleString()}개 · 비교 {comparison.length}/3</p></div>
-<div className="rounded-2xl border border-violet-200 bg-violet-50/50 px-4 py-3"><div className="flex flex-wrap items-center justify-between gap-2"><div><p className="font-bold text-slate-900">계산 결과 이력</p><p className="mt-1 text-[11px] text-slate-600">서버로 전송하지 않고 이 브라우저에 최대 {MAX_SAVED_RESULTS}개까지 저장합니다.</p></div><div className="flex gap-2"><input aria-label="저장 결과 이름" value={saveName} onChange={(event) => setSaveName(event.target.value)} placeholder="저장 이름(선택)" className="w-40 rounded-lg border border-violet-200 bg-white px-2 py-1.5 text-xs" /><button type="button" onClick={saveCurrentResult} className="rounded-lg bg-violet-700 px-3 py-1.5 text-xs font-bold text-white">현재 결과 저장</button></div></div>{historyNotice ? <p className="mt-2 rounded-lg bg-white px-2 py-1.5 text-[11px] text-violet-900" role="status">{historyNotice}</p> : null}{savedResults.length ? <div className="mt-3 space-y-2">{savedResults.map((item) => { const versionMismatch = item.payload.metadata?.engineVersion !== CALCULATION_ENGINE_VERSION || item.payload.metadata?.appVersion !== APP_VERSION || item.payload.metadata?.baselineVersion !== BASELINE_VERSION || item.payload.metadata?.gsrmReferenceVersion !== GSRM_REFERENCE_VERSION || item.payload.metadata?.anCatalogVersion !== AN_CATALOG_VERSION; return <div key={item.id} className="flex flex-wrap items-center justify-between gap-2 rounded-xl border border-violet-100 bg-white px-3 py-2 text-xs"><div><p className="font-bold text-slate-900">{item.name}</p><p className="text-[11px] text-slate-500">{new Date(item.savedAt).toLocaleString("ko-KR")} · 후보 {item.payload.search?.totalCombinations?.toLocaleString?.() ?? "-"}개 {versionMismatch ? "· 버전 불일치" : ""}</p></div><div className="flex flex-wrap gap-1.5"><button type="button" onClick={() => loadSavedResult(item)} className="rounded-md border border-violet-200 px-2 py-1 font-semibold text-violet-800">불러오기</button><button type="button" onClick={() => downloadExport("json", item.payload)} className="rounded-md border border-slate-200 px-2 py-1">JSON</button><button type="button" onClick={() => downloadExport("csv", item.payload)} className="rounded-md border border-slate-200 px-2 py-1">CSV</button><button type="button" onClick={() => renameSavedResult(item.id)} className="rounded-md border border-slate-200 px-2 py-1">이름 변경</button><button type="button" onClick={() => deleteSavedResult(item.id)} className="rounded-md border border-rose-200 px-2 py-1 text-rose-700">삭제</button></div></div>})}</div> : <p className="mt-3 text-[11px] text-slate-500">저장된 계산 결과가 없습니다.</p>}<div className="mt-3 flex flex-wrap items-center gap-2"><span className="text-[11px] font-semibold text-slate-600">저장 결과 비교</span><select aria-label="비교 결과 1" value={comparisonResultIds[0]} onChange={(event) => setComparisonResultIds(([_, second]) => [event.target.value, second])} className="rounded-lg border border-violet-200 bg-white px-2 py-1.5 text-xs"><option value="">첫 결과 선택</option>{savedResults.map((item) => <option key={item.id} value={item.id}>{item.name}</option>)}</select><select aria-label="비교 결과 2" value={comparisonResultIds[1]} onChange={(event) => setComparisonResultIds(([first]) => [first, event.target.value])} className="rounded-lg border border-violet-200 bg-white px-2 py-1.5 text-xs"><option value="">둘째 결과 선택</option>{savedResults.map((item) => <option key={item.id} value={item.id}>{item.name}</option>)}</select></div>{comparisonResultIds[0] && comparisonResultIds[1] ? <SavedComparison first={savedResults.find((item) => item.id === comparisonResultIds[0])!} second={savedResults.find((item) => item.id === comparisonResultIds[1])!} /> : null}</div>
+<details className="rounded-2xl border border-violet-200 bg-violet-50/50 px-4 py-3"><summary className="cursor-pointer font-bold text-slate-900">계산 결과 이력</summary><div className="mt-3"><p className="text-[11px] text-slate-600">서버로 전송하지 않고 이 브라우저에 최대 {MAX_SAVED_RESULTS}개까지 저장합니다. 백업 파일에도 계산 결과와 버전 정보가 포함됩니다.</p><div className="mt-3 flex flex-wrap items-center gap-2"><input aria-label="저장 결과 이름" value={saveName} onChange={(event) => setSaveName(event.target.value)} placeholder="저장 이름(선택)" className="w-40 rounded-lg border border-violet-200 bg-white px-2 py-1.5 text-xs" /><button type="button" onClick={saveCurrentResult} className="rounded-lg bg-violet-700 px-3 py-1.5 text-xs font-bold text-white">현재 결과 저장</button><button type="button" onClick={exportHistoryBackup} className="rounded-lg border border-violet-300 bg-white px-3 py-1.5 text-xs font-bold text-violet-800">전체 이력 JSON 백업</button><input ref={backupFileInput} type="file" accept="application/json,.json" className="sr-only" aria-label="계산 결과 백업 파일 선택" onChange={(event) => { const file = event.target.files?.[0]; if (file) void inspectHistoryBackup(file); }} /><button type="button" onClick={() => backupFileInput.current?.click()} className="rounded-lg border border-violet-300 bg-white px-3 py-1.5 text-xs font-bold text-violet-800">백업 JSON 불러오기</button></div>{historyNotice ? <p className="mt-2 rounded-lg bg-white px-2 py-1.5 text-[11px] text-violet-900" role="status">{historyNotice}</p> : null}{pendingImport ? <div className="mt-2 rounded-lg border border-amber-200 bg-amber-50 p-2 text-[11px] text-amber-900"><p>{pendingImport.versionMismatch ? "버전이 다른 결과가 포함되어 있습니다. 계산 결과를 덮어쓰지 않으며, 저장 이력으로만 복원합니다." : "백업 파일을 확인했습니다. 기존 이력을 어떻게 처리할지 선택하세요."}</p><div className="mt-2 flex flex-wrap gap-2"><button type="button" onClick={() => applyHistoryImport(false)} className="rounded-md bg-amber-700 px-2 py-1 font-bold text-white">기존 이력에 추가</button><button type="button" onClick={() => { if (window.confirm("현재 저장 이력을 백업 내용으로 교체할까요?")) applyHistoryImport(true); }} className="rounded-md border border-amber-400 bg-white px-2 py-1 font-bold text-amber-900">전체 교체</button><button type="button" onClick={() => setPendingImport(null)} className="rounded-md border border-slate-300 bg-white px-2 py-1">취소</button></div></div> : null}{savedResults.length ? <div className="mt-3 space-y-2">{savedResults.map((item) => { const versionMismatch = item.payload.metadata?.engineVersion !== CALCULATION_ENGINE_VERSION || item.payload.metadata?.appVersion !== APP_VERSION || item.payload.metadata?.baselineVersion !== BASELINE_VERSION || item.payload.metadata?.gsrmReferenceVersion !== GSRM_REFERENCE_VERSION || item.payload.metadata?.anCatalogVersion !== AN_CATALOG_VERSION; return <div key={item.id} className="flex flex-wrap items-center justify-between gap-2 rounded-xl border border-violet-100 bg-white px-3 py-2 text-xs"><div><p className="font-bold text-slate-900">{item.name}</p><p className="text-[11px] text-slate-500">{new Date(item.savedAt).toLocaleString("ko-KR")} · 후보 {item.payload.search?.totalCombinations?.toLocaleString?.() ?? "-"}개 {versionMismatch ? "· 버전 불일치" : ""}</p></div><div className="flex flex-wrap gap-1.5"><button type="button" onClick={() => loadSavedResult(item)} className="rounded-md border border-violet-200 px-2 py-1 font-semibold text-violet-800">불러오기</button><button type="button" onClick={() => downloadExport("json", item.payload)} className="rounded-md border border-slate-200 px-2 py-1">JSON</button><button type="button" onClick={() => downloadExport("csv", item.payload)} className="rounded-md border border-slate-200 px-2 py-1">CSV</button><button type="button" onClick={() => renameSavedResult(item.id)} className="rounded-md border border-slate-200 px-2 py-1">이름 변경</button><button type="button" onClick={() => deleteSavedResult(item.id)} className="rounded-md border border-rose-200 px-2 py-1 text-rose-700">삭제</button></div></div>})}</div> : <p className="mt-3 text-[11px] text-slate-500">저장된 계산 결과가 없습니다.</p>}<div className="mt-3 flex flex-wrap items-center gap-2"><span className="text-[11px] font-semibold text-slate-600">저장 결과 비교</span><select aria-label="비교 결과 1" value={comparisonResultIds[0]} onChange={(event) => setComparisonResultIds(([_, second]) => [event.target.value, second])} className="rounded-lg border border-violet-200 bg-white px-2 py-1.5 text-xs"><option value="">첫 결과 선택</option>{savedResults.map((item) => <option key={item.id} value={item.id}>{item.name}</option>)}</select><select aria-label="비교 결과 2" value={comparisonResultIds[1]} onChange={(event) => setComparisonResultIds(([first]) => [first, event.target.value])} className="rounded-lg border border-violet-200 bg-white px-2 py-1.5 text-xs"><option value="">둘째 결과 선택</option>{savedResults.map((item) => <option key={item.id} value={item.id}>{item.name}</option>)}</select></div>{comparisonResultIds[0] && comparisonResultIds[1] ? <SavedComparison first={savedResults.find((item) => item.id === comparisonResultIds[0])!} second={savedResults.find((item) => item.id === comparisonResultIds[1])!} /> : null}</div></details>
 {comparison.length > 0 ? <div className="rounded-2xl border border-cyan-200 bg-white p-3"><p className="text-xs font-bold text-slate-900">선택 후보 비교 ({comparison.length}/3)</p><div className="mt-2 grid gap-2 sm:grid-cols-3">{comparison.map((candidate) => <div key={`${candidate.input.grainOuterDiameterMm}-${candidate.input.grainCoreDiameterMm}-${candidate.input.segmentLengthMm}-${candidate.input.segmentCount}`} className="rounded-xl border border-slate-200 p-3 text-[11px]"><div className="flex items-center justify-between gap-2"><strong>{candidate.input.grainOuterDiameterMm}×{candidate.input.grainCoreDiameterMm}×{candidate.input.segmentLengthMm}/{candidate.input.segmentCount}</strong><StatusPill status={candidate.status} /></div><p className="mt-2">질량 {formatNumber(candidate.grainMassKg,4)} kg</p><p>압력 {formatNumber(candidate.maximumPressureMpa,4)} MPa</p><p>연소 {formatNumber(candidate.burnTimeSec,4)} s</p><p>추력 {formatNumber(candidate.averageThrustN,2)} N</p><p className="mt-1 text-slate-500">{candidate.reasons.join(" ") || "조건 충족"}</p></div>)}</div></div> : null}
 <div className="overflow-hidden rounded-3xl border border-slate-200 bg-white shadow-sm">
 <div className="hidden overflow-x-auto sm:block">
