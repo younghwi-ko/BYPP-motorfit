@@ -247,6 +247,7 @@ test("계산 결과 이력 JSON 백업·복원과 잘못된 파일 거부", asyn
   expect(backupPayload.app).toBe("MotorFit");
   expect(backupPayload.schemaVersion).toBe(1);
   expect(backupPayload.results).toHaveLength(1);
+  expect(JSON.stringify(backupPayload)).not.toMatch(/password|api[_-]?key|secret|token|process\.env/i);
   await page.getByRole("button", { name: "삭제" }).click();
   await expect(page.getByText("저장된 계산 결과가 없습니다.")).toBeVisible();
   const fileInput = page.getByLabel("계산 결과 백업 파일 선택");
