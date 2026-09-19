@@ -12,13 +12,15 @@ import type {
   CandidateSearchResult,
 } from "../engine";
 
+const DEFAULT_FUEL_MASS_TOLERANCE_KG = 0.010;
+
 const DEFAULT_CONFIG: CandidateSearchConfig = {
   mode: "candidate",
   chamberDiameterMm: 45,
   chamberLengthMm: 165,
   propellant: "KNSB coarse",
   targetFuelMassKg: 0.3956,
-  fuelMassToleranceKg: 0.005,
+  fuelMassToleranceKg: DEFAULT_FUEL_MASS_TOLERANCE_KG,
   maximumPressureMpa: 4.1,
   targetAverageThrustN: 209.845,
   targetThrustEnabled: false,
@@ -52,6 +54,14 @@ const PROPELLANTS = [
 
 const formatNumber = (value: number, digits = 3) =>
   value.toLocaleString("ko-KR", { maximumFractionDigits: digits });
+
+const formatMassTolerance = (value: number) => `${value.toFixed(3)} kg`;
+
+function migrateStoredConfig(config: CandidateSearchConfig): CandidateSearchConfig {
+  return config.fuelMassToleranceKg === 0.005
+    ? { ...config, fuelMassToleranceKg: DEFAULT_FUEL_MASS_TOLERANCE_KG }
+    : config;
+}
 
 function Field({ label, value, step = "any", onChange, suffix }: { label: string; value: number; step?: number | "any"; onChange: (value: number) => void; suffix?: string }) {
   return (
@@ -270,7 +280,7 @@ const requestCancel = () => { cancelRequested.current = true; searchWorker.curre
       if (saved) {
         const parsed = JSON.parse(saved) as { config?: CandidateSearchConfig; targetThrustText?: string; mode?: "candidate" | "excel"; automaticMode?: boolean; calculatedSignature?: string };
         window.setTimeout(() => {
-          if (parsed.config) setConfig(parsed.config);
+          if (parsed.config) setConfig(migrateStoredConfig(parsed.config));
           if (typeof parsed.targetThrustText === "string") setTargetThrustText(parsed.targetThrustText);
           if (parsed.mode) setMode(parsed.mode);
           if (typeof parsed.automaticMode === "boolean") setAutomaticMode(parsed.automaticMode);
@@ -511,6 +521,7 @@ const requestCancel = () => { cancelRequested.current = true; searchWorker.curre
 <div><p className="mb-2 text-xs font-bold text-cyan-800">2단계 · 최대 허용 압력</p><Field label="최대 허용 압력" value={config.maximumPressureMpa} onChange={(value) => updateNumber("maximumPressureMpa", value)} suffix="MPa" /><button type="button" onClick={() => runSearch(2)} disabled={running} className="mt-2 w-full rounded-lg border border-cyan-300 bg-white px-3 py-2 text-xs font-bold text-cyan-800 disabled:opacity-60">압력 조건 적용</button></div>
 <div><p className="mb-2 text-xs font-bold text-cyan-800">3단계 · 목표 평균 추력</p><OptionalField label="목표 평균 추력" value={targetThrustText} onChange={setTargetThrustText} suffix="N" /><p className={`mt-2 rounded-lg px-2.5 py-2 text-[11px] leading-5 ${targetThrustText.trim() === "" ? "bg-slate-100 text-slate-600" : "bg-cyan-100 text-cyan-800"}`}>{targetThrustText.trim() === "" ? "추력 목표가 비어 있어 MSE·최대 편차·추력 변동성·추력 점수는 계산하지 않습니다." : "추력 곡선과 목표 추력선의 오차를 함께 평가합니다."}</p><button type="button" onClick={() => runSearch(3)} disabled={running} className="mt-2 w-full rounded-lg border border-cyan-300 bg-white px-3 py-2 text-xs font-bold text-cyan-800 disabled:opacity-60">최종 추천 계산</button></div>
 </div>
+<p className="mt-3 rounded-xl border border-slate-200 bg-slate-50 px-3 py-2 text-xs font-semibold text-slate-700">현재 적용 중인 질량 허용 오차: <strong className="font-mono text-slate-950">{formatMassTolerance(config.fuelMassToleranceKg)}</strong> · 상세 설정에서 변경할 수 있으며 변경 후에는 재계산이 필요합니다.</p>
 <div className="mt-4">
 <label className="block">
 <span className="mb-1.5 block text-xs font-semibold text-slate-600">추진제</span>
@@ -580,6 +591,7 @@ const requestCancel = () => { cancelRequested.current = true; searchWorker.curre
 </div>
 </div> : <div className="space-y-6">
 <div className="rounded-3xl border border-cyan-200 bg-gradient-to-br from-cyan-50 to-white p-4 shadow-sm sm:p-5"><div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between"><div><p className="text-xs font-bold uppercase tracking-[0.14em] text-cyan-700">현재 계산 요약</p><h2 className="mt-1 text-lg font-bold text-slate-950">목표와 탐색 상태를 한눈에 확인하세요</h2></div><span className="rounded-full bg-slate-900 px-3 py-1 text-xs font-bold text-white">UI 단계 {completedStage}/3</span></div><div className="mt-4 grid grid-cols-2 gap-2 sm:grid-cols-4"><div className="rounded-2xl bg-white px-3 py-3 shadow-sm"><p className="text-[11px] font-semibold text-slate-500">목표 질량</p><p className="mt-1 text-base font-bold text-slate-950">{formatNumber(config.targetFuelMassKg, 4)} <span className="text-xs font-normal text-slate-500">kg</span></p></div><div className="rounded-2xl bg-white px-3 py-3 shadow-sm"><p className="text-[11px] font-semibold text-slate-500">최대 허용 압력</p><p className="mt-1 text-base font-bold text-slate-950">{formatNumber(config.maximumPressureMpa, 3)} <span className="text-xs font-normal text-slate-500">MPa</span></p></div><div className="rounded-2xl bg-white px-3 py-3 shadow-sm"><p className="text-[11px] font-semibold text-slate-500">목표 평균 추력</p><p className="mt-1 text-base font-bold text-slate-950">{targetThrustText.trim() === "" ? "미입력" : `${formatNumber(Number(targetThrustText), 2)} N`}</p></div><div className="rounded-2xl bg-white px-3 py-3 shadow-sm"><p className="text-[11px] font-semibold text-slate-500">자동 확장 단계</p><p className="mt-1 text-base font-bold text-violet-700">{search ? `${search.automaticExpansionStage ?? 0}단계` : "대기"}</p></div></div><p className="mt-3 text-[11px] text-slate-600">UI 입력 단계는 질량 → 압력 → 최종 추천의 완료 상태이고, 자동 확장 단계는 탐색 범위 확장 횟수입니다.</p></div>
+<p className="-mt-4 rounded-xl border border-cyan-100 bg-white px-3 py-2 text-xs text-slate-700">결과에 적용된 질량 허용 오차: <strong className="font-mono text-slate-950">{formatMassTolerance(config.fuelMassToleranceKg)}</strong></p>
 {restoredFromStorage && !search ? <div className="rounded-2xl border border-sky-200 bg-sky-50 px-4 py-3 text-xs text-sky-900" role="status">저장된 입력값을 복원했습니다. 마지막 계산 결과는 현재 화면에 없으므로 다시 계산해 주세요.</div> : null}
 {search && calculatedSignature !== inputSignature ? <div className="rounded-2xl border-2 border-amber-300 bg-amber-50 px-4 py-3 text-xs text-amber-950" role="alert"><strong>재계산 필요</strong> · 입력값이 마지막 계산 결과와 달라졌습니다.</div> : null}
 <div className="flex flex-col gap-3 rounded-2xl border border-slate-200 bg-white px-5 py-4 shadow-sm sm:flex-row sm:items-center sm:justify-between">

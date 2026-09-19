@@ -124,15 +124,38 @@ test("후보 유형별 상세보기와 비교 선택 분리", async ({ page }) =
   await expect(page.getByText(/추천 후보 상세|조건부 후보 상세|탈락 후보 상세|참고용 탈락 후보 상세/)).toBeVisible();
 });
 
-test("2.000 kg 참고용 탈락 후보 상세보기", async ({ page }) => {
+test("2.000 kg 기본 질량 허용 오차 분류와 상세보기", async ({ page }) => {
   await page.addInitScript(() => localStorage.clear());
   await page.goto("/");
   await page.waitForTimeout(5000);
   await calculate(page, "2.000", "4.0", "");
-  const referenceCard = page.getByText("추천 후보가 아니며, 목표 질량에 가장 가까운 탈락 후보입니다.", { exact: true }).locator("..");
-  const referenceButton = referenceCard.getByRole("button", { name: "상세 보기" });
-  await expect(referenceButton).toBeVisible();
-  await referenceButton.click();
-  await expect(page.getByText("참고용 탈락 후보 상세", { exact: true })).toBeVisible();
-  await expect(page.getByText("참고용 탈락 후보입니다.")).toBeVisible();
+  const nearTargetRow = page.getByRole("row").filter({ hasText: "1.9904 kg" }).first();
+  await expect(nearTargetRow.getByRole("status", { name: "조건부 후보" })).toBeVisible();
+  await nearTargetRow.getByRole("button", { name: /상세 보기/ }).click();
+  await expect(page.getByText("조건부 후보 상세", { exact: true })).toBeVisible();
+});
+
+test("질량 허용 오차 기본값과 저장값 마이그레이션", async ({ page }) => {
+  await page.addInitScript(() => localStorage.clear());
+  await page.goto("/");
+  await expect(page.getByText(/현재 적용 중인 질량 허용 오차: 0\.010 kg/)).toBeVisible();
+  const saved = await page.evaluate(() => JSON.parse(window.localStorage.getItem("motorfit-input-v1") ?? "{}"));
+  saved.config.fuelMassToleranceKg = 0.005;
+  await page.evaluate((value) => window.localStorage.setItem("motorfit-input-v1", JSON.stringify(value)), saved);
+  await page.reload();
+  await expect(page.getByText(/현재 적용 중인 질량 허용 오차: 0\.010 kg/)).toBeVisible();
+  await page.waitForTimeout(5000);
+  await calculate(page, "0.3956", "4.1", "");
+  const download = page.waitForEvent("download");
+  await page.getByRole("button", { name: "JSON 내보내기" }).click();
+  const jsonPath = await (await download).path();
+  expect(jsonPath).toBeTruthy();
+  const { readFile } = await import("node:fs/promises");
+  const payload = JSON.parse(await readFile(jsonPath!, "utf8"));
+  expect(payload.input.fuelMassToleranceKg).toBe(0.01);
+  const csvDownload = page.waitForEvent("download");
+  await page.getByRole("button", { name: "CSV 내보내기" }).click();
+  const csvPath = await (await csvDownload).path();
+  expect(csvPath).toBeTruthy();
+  expect(await readFile(csvPath!, "utf8")).toContain('"fuelMassToleranceKg":0.01');
 });
