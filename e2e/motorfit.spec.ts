@@ -159,3 +159,19 @@ test("질량 허용 오차 기본값과 저장값 마이그레이션", async ({ 
   expect(csvPath).toBeTruthy();
   expect(await readFile(csvPath!, "utf8")).toContain('"fuelMassToleranceKg":0.01');
 });
+
+test("동일 입력은 동일한 대표 후보를 유지하고 모바일 요약을 우선 표시", async ({ page }) => {
+  await page.addInitScript(() => localStorage.clear());
+  await page.setViewportSize({ width: 390, height: 844 });
+  await page.goto("/");
+  await page.waitForTimeout(1500);
+  await calculate(page, "2.000", "4.0", "");
+  const first = await page.getByTestId("representative-candidate").innerText();
+  const firstCounts = await page.getByText(/전체\s+[\d,]+개 · 정밀 계산/).first().innerText();
+  await page.getByRole("button", { name: "최종 추천 계산" }).click();
+  await expect(page.getByText(/UI 단계\s*3\s*\/\s*3/)).toBeVisible({ timeout: 300_000 });
+  const second = await page.getByTestId("representative-candidate").innerText();
+  const secondCounts = await page.getByText(/전체\s+[\d,]+개 · 정밀 계산/).first().innerText();
+  expect(second).toBe(first);
+  expect(secondCounts).toBe(firstCounts);
+});
