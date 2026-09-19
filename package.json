@@ -9,7 +9,9 @@
     "lint": "eslint",
     "typecheck": "tsc --noEmit",
     "test": "vitest run",
-    "test:watch": "vitest"
+    "test:watch": "vitest",
+    "test:e2e": "playwright test",
+    "test:performance": "playwright test e2e/motorfit.performance.spec.ts"
   },
   "dependencies": {
     "next": "16.3.5",
@@ -17,6 +19,7 @@
     "react-dom": "19.2.8"
   },
   "devDependencies": {
+    "@playwright/test": "1.52.0",
     "@tailwindcss/postcss": "^4",
     "@types/node": "^24.13.5",
     "@types/react": "^19",

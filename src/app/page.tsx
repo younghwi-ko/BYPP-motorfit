@@ -2,7 +2,7 @@
 
 import { useEffect, useMemo, useRef, useState } from "react";
 
-import { AN_SERIES_CATALOG, CandidateSearchCancelledError, CandidateSearchInputError, calculateGsrmReferenceDiameter, createAutomaticCandidateSearchConfig, DEFAULT_GSRM_WALL_THICKNESS_MM, estimateCandidateCount, evaluateAnCatalog, searchCandidatesAsync } from "../engine";
+import { AN_SERIES_CATALOG, CandidateSearchCancelledError, CandidateSearchInputError, calculateGsrmReferenceDiameter, DEFAULT_GSRM_WALL_THICKNESS_MM, evaluateAnCatalog } from "../engine";
 import type { GsrmBatchResult } from "../engine";
 import { SCORE_GUIDANCE, sortCandidates } from "./candidate-table";
 import type { CandidateSortDirection, CandidateSortKey } from "./candidate-table";
@@ -169,7 +169,9 @@ function RecommendationRow({ label, value, tone = "slate" }: { label: string; va
 </li>;
 }
 
-function AnCatalogPanel({ referenceDiameterMm }: { referenceDiameterMm: number }) {
+type AnExportState = { query: string; page: number; pageCount: number; total: number; recommend: number; conditional: number; fail: number };
+
+function AnCatalogPanel({ referenceDiameterMm, onStateChange }: { referenceDiameterMm: number; onStateChange?: (state: AnExportState) => void }) {
   const [results, setResults] = useState<GsrmBatchResult[] | null>(null);
   const [running, setRunning] = useState(false);
   const [query, setQuery] = useState("");
@@ -179,6 +181,10 @@ function AnCatalogPanel({ referenceDiameterMm }: { referenceDiameterMm: number }
   const pageSize = 20;
   const pageCount = Math.max(1, Math.ceil(filtered.length / pageSize));
   const pageRows = filtered.slice(page * pageSize, (page + 1) * pageSize);
+  useEffect(() => {
+    if (!results) return;
+    onStateChange?.({ query, page: page + 1, pageCount, total: results.length, recommend: results.filter((r) => r.calculation.check.status === "recommend").length, conditional: results.filter((r) => r.calculation.check.status === "conditional").length, fail: results.filter((r) => r.calculation.check.status === "fail").length });
+  }, [onStateChange, page, pageCount, query, results]);
   return <div className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm">
 <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
 <div>
@@ -253,7 +259,10 @@ export default function Home() {
   const [comparison, setComparison] = useState<CandidateResult[]>([]);
   const [calculatedSignature, setCalculatedSignature] = useState<string | null>(null);
   const [restoredFromStorage, setRestoredFromStorage] = useState(false);
-  const cancelRequested = useRef(false);
+  const [anExportState, setAnExportState] = useState<AnExportState | null>(null);
+const cancelRequested = useRef(false);
+const requestCancel = () => { cancelRequested.current = true; searchWorker.current?.postMessage({ type: "cancel" }); setProgressText("계산 취소 요청 중… 마지막 완료 단계로 돌아갑니다."); };
+  const searchWorker = useRef<Worker | null>(null);
 
   const inputSignature = useMemo(() => JSON.stringify({ config, targetThrustText, mode, automaticMode }), [automaticMode, config, mode, targetThrustText]);
   useEffect(() => {
@@ -306,24 +315,40 @@ export default function Home() {
     const parsedTargetThrust = Number(targetThrustText);
     const targetThrustEnabled = targetThrustText.trim() !== "";
     const baseConfig: CandidateSearchConfig = { ...config, targetAverageThrustN: targetThrustEnabled ? parsedTargetThrust : config.targetAverageThrustN, targetThrustEnabled, mode, burnTimeFilterEnabled: automaticMode ? false : config.burnTimeFilterEnabled };
-    const runConfig: CandidateSearchConfig = mode === "excel" ? { ...baseConfig, targetThrustEnabled: true, outerDiameterMm: { min: config.outerDiameterMm.min, max: config.outerDiameterMm.min, step: 1 }, coreDiameterMm: { min: config.coreDiameterMm.min, max: config.coreDiameterMm.min, step: 1 }, segmentLengthMm: { min: config.segmentLengthMm.min, max: config.segmentLengthMm.min, step: 1 }, segmentCount: { min: config.segmentCount.min, max: config.segmentCount.min }, maxCandidateCount: 1 } : automaticMode ? createAutomaticCandidateSearchConfig(baseConfig) : { ...baseConfig, maxCandidateCount: Number.MAX_SAFE_INTEGER };
-    const totalCandidates = estimateCandidateCount(runConfig);
-    const plannedPrecision = Math.min(totalCandidates, runConfig.maxCandidateCount ?? totalCandidates);
     setRunning(true);
-    setProgressText(`0 / ${plannedPrecision.toLocaleString()}개 정밀 계산 준비 · 전체 ${totalCandidates.toLocaleString()}개 후보`);
+    setProgressText("탐색 범위 준비 중 · 계산 Worker 시작");
     setProgressPercent(0);
     setErrorMessage(null);
     setSortKey(null);
     setSortDirection(null);
     await new Promise<void>((resolve) => window.setTimeout(resolve, 0));
     try {
-      const result = await searchCandidatesAsync(runConfig, {
-        batchSize: 10,
-        shouldCancel: () => cancelRequested.current,
-        onProgress: ({ completed, total }) => {
-          setProgressText(`${completed.toLocaleString()} / ${total.toLocaleString()}개 정밀 계산 · 전체 ${totalCandidates.toLocaleString()}개 후보`);
-          setProgressPercent(total === 0 ? 100 : (completed / total) * 100);
-        },
+      const result = await new Promise<CandidateSearchResult>((resolve, reject) => {
+        const worker = new Worker(new URL("../engine/search-worker.ts", import.meta.url), { type: "module" });
+        searchWorker.current = worker;
+        let streamedCandidates: CandidateResult[] = [];
+        let streamedSummary: Omit<CandidateSearchResult, "candidates" | "passedCandidates" | "nearestRejectedCandidate"> | null = null;
+        let streamedPassedIndices: number[] = [];
+        let streamedNearestRejectedIndex = -1;
+        worker.onmessage = (event: MessageEvent<{ type: string; candidate?: CandidateResult; summary?: Omit<CandidateSearchResult, "candidates" | "passedCandidates" | "nearestRejectedCandidate">; passedIndices?: number[]; nearestRejectedIndex?: number; completed?: number; total?: number; totalCandidates?: number; plannedPrecision?: number; issues?: readonly string[]; message?: string }>) => {
+          if (event.data.type === "prepared") {
+            setProgressText(`0 / ${(event.data.plannedPrecision ?? 0).toLocaleString()}개 정밀 계산 준비 · 전체 ${(event.data.totalCandidates ?? 0).toLocaleString()}개 후보`);
+            setProgressPercent(0);
+          }
+          if (event.data.type === "progress") {
+            const completed = event.data.completed ?? 0;
+            const total = event.data.total ?? 0;
+            setProgressText(`${completed.toLocaleString()} / ${total.toLocaleString()}개 정밀 계산`);
+            setProgressPercent(total === 0 ? 100 : (completed / total) * 100);
+          } else if (event.data.type === "result-start" && event.data.summary) { streamedSummary = event.data.summary; streamedPassedIndices = event.data.passedIndices ?? []; streamedNearestRejectedIndex = event.data.nearestRejectedIndex ?? -1; streamedCandidates = []; }
+          else if (event.data.type === "candidate" && event.data.candidate) streamedCandidates.push(event.data.candidate);
+          else if (event.data.type === "result-end" && streamedSummary) resolve({ ...streamedSummary, candidates: streamedCandidates, passedCandidates: streamedPassedIndices.map((index) => streamedCandidates[index]).filter(Boolean), nearestRejectedCandidate: streamedNearestRejectedIndex >= 0 ? streamedCandidates[streamedNearestRejectedIndex] : undefined });
+          else if (event.data.type === "cancelled") reject(new CandidateSearchCancelledError());
+          else if (event.data.type === "input-error") reject(new CandidateSearchInputError(event.data.issues ?? ["입력을 확인하세요."]));
+          else if (event.data.type === "error") reject(new Error(event.data.message ?? "worker error"));
+        };
+        worker.onerror = () => reject(new Error("후보 계산 Worker 실행 중 오류가 발생했습니다."));
+        worker.postMessage({ type: "run", config: baseConfig, mode, automaticMode, batchSize: 10 });
       });
       if (cancelRequested.current) {
         setCancelled(true);
@@ -336,12 +361,14 @@ export default function Home() {
       setSortKey(null);
       setSortDirection(null);
     } catch (error) {
-      if (error instanceof CandidateSearchCancelledError) return;
-      const message = error instanceof CandidateSearchInputError ? error.issues.join(" ") : "후보 계산 중 오류가 발생했습니다. 입력 범위와 물성값을 확인한 뒤 다시 시도하세요.";
+      if (error instanceof CandidateSearchCancelledError) { setCancelled(true); return; }
+      const message = error instanceof CandidateSearchInputError ? error.issues.join(" ") : error instanceof Error && error.message !== "unknown" ? error.message : "후보 계산 중 오류가 발생했습니다. 입력 범위와 물성값을 확인한 뒤 다시 시도하세요.";
       setErrorMessage(message);
       setSearch(null);
       setSelected(null);
     } finally {
+      searchWorker.current?.terminate();
+      searchWorker.current = null;
       setRunning(false);
       setRunningStage(null);
       setProgressText("");
@@ -362,8 +389,20 @@ export default function Home() {
   const downloadExport = (format: "csv" | "json") => {
     if (!search) return;
     const rows = search.candidates.map((candidate) => ({ status: candidate.status, geometry: `${candidate.input.grainOuterDiameterMm}×${candidate.input.grainCoreDiameterMm}×${candidate.input.segmentLengthMm}/${candidate.input.segmentCount}`, massKg: candidate.grainMassKg, maximumPressureMpa: candidate.maximumPressureMpa, burnTimeSec: candidate.burnTimeSec, averageThrustN: candidate.averageThrustN, reasons: candidate.reasons.join(" ") }));
-    const payload = { exportedAt: new Date().toISOString(), input: { ...config, targetThrustText, targetThrustEnabled: targetThrustText.trim() !== "" }, search: { totalCombinations: search.totalCombinations, evaluatedCombinations: search.evaluatedCombinations, automaticExpansionStage: search.automaticExpansionStage ?? 0, searchEnvelope: search.searchEnvelope, warning: search.warning, diagnosis: search.diagnosis }, candidates: rows, selectedCandidates: comparison.map((candidate) => rows[search.candidates.indexOf(candidate)]), referenceCandidate: closestFailedCandidate ? rows[search.candidates.indexOf(closestFailedCandidate)] : null, gsrm: selected ? { referenceDiameterMm: gsrmReferenceDiameterMm, note: "선택 후보의 GSRM B 변환값. AN 검사는 화면에서 실행한 결과를 기준으로 합니다." } : null, an: { catalogSize: 241, query: "현재 화면 검색어", page: "현재 화면 페이지" } };
-    const text = format === "json" ? JSON.stringify(payload, null, 2) : ["status,geometry,massKg,maximumPressureMpa,burnTimeSec,averageThrustN,reasons", ...rows.map((row) => [row.status, row.geometry, row.massKg, row.maximumPressureMpa, row.burnTimeSec, row.averageThrustN, JSON.stringify(row.reasons)].join(","))].join("\n");
+    const payload = { exportedAt: new Date().toISOString(), input: { ...config, targetThrustText, targetThrustEnabled: targetThrustText.trim() !== "" }, search: { totalCombinations: search.totalCombinations, evaluatedCombinations: search.evaluatedCombinations, automaticExpansionStage: search.automaticExpansionStage ?? 0, searchEnvelope: search.searchEnvelope, warning: search.warning, diagnosis: search.diagnosis }, candidates: rows, selectedCandidates: comparison.map((candidate) => rows[search.candidates.indexOf(candidate)]), referenceCandidate: closestFailedCandidate ? rows[search.candidates.indexOf(closestFailedCandidate)] : null, gsrm: selected ? { referenceDiameterMm: gsrmReferenceDiameterMm, note: "선택 후보의 GSRM B 변환값. AN 검사는 화면에서 실행한 결과를 기준으로 합니다." } : null, an: anExportState ? { catalogSize: anExportState.total, query: anExportState.query, page: anExportState.page, pageCount: anExportState.pageCount, recommend: anExportState.recommend, conditional: anExportState.conditional, fail: anExportState.fail } : { catalogSize: 241, query: "미실행", page: 0, pageCount: 0, recommend: 0, conditional: 0, fail: 0 } };
+    const csvValue = (value: unknown) => JSON.stringify(value ?? "");
+    const csvLines = [
+      "# MotorFit export",
+      `input,${csvValue(payload.input)}`,
+      `search,${csvValue(payload.search)}`,
+      `referenceCandidate,${csvValue(payload.referenceCandidate)}`,
+      `gsrm,${csvValue(payload.gsrm)}`,
+      `an,${csvValue(payload.an)}`,
+      "candidates",
+      "status,geometry,massKg,maximumPressureMpa,burnTimeSec,averageThrustN,reasons",
+      ...rows.map((row) => [row.status, row.geometry, row.massKg, row.maximumPressureMpa, row.burnTimeSec, row.averageThrustN, csvValue(row.reasons)].join(",")),
+    ];
+    const text = format === "json" ? JSON.stringify(payload, null, 2) : csvLines.join("\n");
     const blob = new Blob([text], { type: format === "json" ? "application/json" : "text/csv;charset=utf-8" });
     const url = URL.createObjectURL(blob); const anchor = document.createElement("a"); anchor.href = url; anchor.download = `motorfit-results.${format}`; anchor.click(); URL.revokeObjectURL(url);
   };
@@ -544,7 +583,7 @@ export default function Home() {
           </div>
 </div>
 <button type="button" onClick={() => runSearch(3)} disabled={running} className={`${automaticMode && mode !== "excel" ? "hidden" : "mt-6"} w-full rounded-xl bg-cyan-600 px-4 py-3 text-sm font-bold text-white shadow-lg shadow-cyan-600/20 transition hover:bg-cyan-700 disabled:cursor-wait disabled:opacity-60`}>{running ? "계산 중…" : mode === "excel" ? "Excel 재현 계산" : "상세 후보 탐색 실행"}</button>
-{running ? <div className="mt-3 rounded-2xl border-2 border-cyan-300 bg-cyan-50 px-3 py-3 text-xs text-cyan-950 shadow-sm"><div className="flex items-center justify-between gap-3"><span className="font-bold">실행 단계 {runningStage ?? "-"} / 3 · 계산 진행 중</span><span className="font-mono text-cyan-700">{Math.round(progressPercent)}%</span></div><div className="mt-2 h-2 overflow-hidden rounded-full bg-cyan-100"><div className="h-full rounded-full bg-cyan-600 transition-[width]" style={{ width: `${progressPercent}%` }} /></div><div className="mt-2 flex items-center justify-between gap-2"><span>{progressText}</span><button type="button" onClick={() => { cancelRequested.current = true; setProgressText("계산 취소 요청 중… 마지막 완료 단계로 돌아갑니다."); }} className="rounded-lg bg-cyan-700 px-3 py-1.5 font-bold text-white shadow-sm hover:bg-cyan-800">계산 취소</button></div></div> : cancelled ? <div className="mt-3 rounded-2xl border-2 border-amber-300 bg-amber-50 px-3 py-3 text-xs text-amber-950"><p className="font-bold">계산이 취소되었습니다.</p><p className="mt-1">마지막 완료 단계: {completedStage} / 3 · 입력을 확인한 뒤 다시 계산할 수 있습니다.</p></div> : null}
+{running ? <div className="mt-3 rounded-2xl border-2 border-cyan-300 bg-cyan-50 px-3 py-3 text-xs text-cyan-950 shadow-sm"><div className="flex items-center justify-between gap-3"><span className="font-bold">실행 단계 {runningStage ?? "-"} / 3 · 계산 진행 중</span><span className="font-mono text-cyan-700">{Math.round(progressPercent)}%</span></div><div className="mt-2 h-2 overflow-hidden rounded-full bg-cyan-100"><div className="h-full rounded-full bg-cyan-600 transition-[width]" style={{ width: `${progressPercent}%` }} /></div><div className="mt-2 flex items-center justify-between gap-2"><span>{progressText}</span><button type="button" onClick={requestCancel} className="rounded-lg bg-cyan-700 px-3 py-1.5 font-bold text-white shadow-sm hover:bg-cyan-800">계산 취소</button></div></div> : cancelled ? <div className="mt-3 rounded-2xl border-2 border-amber-300 bg-amber-50 px-3 py-3 text-xs text-amber-950"><p className="font-bold">계산이 취소되었습니다.</p><p className="mt-1">마지막 완료 단계: {completedStage} / 3 · 입력을 확인한 뒤 다시 계산할 수 있습니다.</p></div> : null}
 <p className="mt-3 text-center text-[11px] text-slate-400">계산은 버튼을 누를 때 브라우저에서 실행됩니다.</p>
         </aside>
         <section className="min-w-0">{errorMessage ? <div className="mb-4 rounded-2xl border border-rose-200 bg-rose-50 px-4 py-3 text-sm leading-6 text-rose-800">
@@ -638,7 +677,7 @@ export default function Home() {
 </label>
 </div>
 </div>
-<AnCatalogPanel referenceDiameterMm={gsrmReferenceDiameterMm ?? 0} />
+<AnCatalogPanel referenceDiameterMm={gsrmReferenceDiameterMm ?? 0} onStateChange={setAnExportState} />
 <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
 <MetricCard label="연료 질량" value={formatNumber(selected.grainMassKg, 4)} unit="kg" tone="cyan" />
 <MetricCard label="최대 압력" value={formatNumber(selected.maximumPressureMpa, 4)} unit="MPa gauge" tone="amber" />
