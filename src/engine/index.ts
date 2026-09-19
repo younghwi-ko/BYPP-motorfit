@@ -51,6 +51,10 @@ export {
 export { calculateTargetKn, TARGET_PRESSURE_OPTIONS_MPA } from "./data/target-kn";
 export { PROPELLANT_CONSTANTS, selectPropellantConstants } from "./data/propellants";
 export { APP_VERSION, CALCULATION_ENGINE_VERSION, BASELINE_VERSION, GSRM_REFERENCE_VERSION, AN_CATALOG_VERSION, AN_CATALOG_ITEM_COUNT } from "./metadata";
+export { VALIDATION_FIXTURES, createValidationSearchConfig } from "./validation-fixtures";
+export type { ValidationFixture } from "./validation-fixtures";
+export { validateFixture, notRunValidation } from "./validation-report";
+export type { ValidationCheck, ValidationCheckKind, ValidationFixtureResult } from "./validation-report";
 export type {
   BurnAreaBreakdown,
   BurnRateCoefficients,

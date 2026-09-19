@@ -2,7 +2,7 @@
 
 import { useEffect, useMemo, useRef, useState } from "react";
 
-import { AN_SERIES_CATALOG, CandidateSearchCancelledError, CandidateSearchInputError, calculateGsrmReferenceDiameter, DEFAULT_GSRM_WALL_THICKNESS_MM, evaluateAnCatalog } from "../engine";
+import { AN_SERIES_CATALOG, CandidateSearchCancelledError, CandidateSearchInputError, calculateGsrmReferenceDiameter, DEFAULT_GSRM_WALL_THICKNESS_MM, evaluateAnCatalog, VALIDATION_FIXTURES, notRunValidation } from "../engine";
 import type { GsrmBatchResult } from "../engine";
 import { SCORE_GUIDANCE, sortCandidates } from "./candidate-table";
 import type { CandidateSortDirection, CandidateSortKey } from "./candidate-table";
@@ -275,6 +275,7 @@ export default function Home() {
   const [completedStage, setCompletedStage] = useState(0);
   const [runningStage, setRunningStage] = useState<number | null>(null);
   const [cancelled, setCancelled] = useState(false);
+  const [lastCalculationStatus, setLastCalculationStatus] = useState<"idle" | "running" | "completed" | "cancelled" | "failed">("idle");
   const [statusFilters, setStatusFilters] = useState<Array<"pass" | "conditional" | "fail">>(["pass", "conditional", "fail"]);
   const [comparison, setComparison] = useState<CandidateResult[]>([]);
   const [calculatedSignature, setCalculatedSignature] = useState<string | null>(null);
@@ -336,6 +337,7 @@ const requestCancel = () => { cancelRequested.current = true; searchWorker.curre
     const targetThrustEnabled = targetThrustText.trim() !== "";
     const baseConfig: CandidateSearchConfig = { ...config, targetAverageThrustN: targetThrustEnabled ? parsedTargetThrust : config.targetAverageThrustN, targetThrustEnabled, mode, burnTimeFilterEnabled: automaticMode ? false : config.burnTimeFilterEnabled };
     setRunning(true);
+    setLastCalculationStatus("running");
     setProgressText("탐색 범위 준비 중 · 계산 Worker 시작");
     setProgressPercent(0);
     setErrorMessage(null);
@@ -375,15 +377,17 @@ const requestCancel = () => { cancelRequested.current = true; searchWorker.curre
         return;
       }
       setSearch(result);
+      setLastCalculationStatus("completed");
       setCompletedStage(stage);
       setCalculatedSignature(inputSignature);
       setSelected(result.candidates.find((candidate) => candidate.status !== "fail") ?? null);
       setSortKey(null);
       setSortDirection(null);
     } catch (error) {
-      if (error instanceof CandidateSearchCancelledError) { setCancelled(true); return; }
+      if (error instanceof CandidateSearchCancelledError) { setCancelled(true); setLastCalculationStatus("cancelled"); return; }
       const message = error instanceof CandidateSearchInputError ? error.issues.join(" ") : error instanceof Error && error.message !== "unknown" ? error.message : "후보 계산 중 오류가 발생했습니다. 입력 범위와 물성값을 확인한 뒤 다시 시도하세요.";
       setErrorMessage(message);
+      setLastCalculationStatus("failed");
       setSearch(null);
       setSelected(null);
     } finally {
@@ -420,13 +424,15 @@ const requestCancel = () => { cancelRequested.current = true; searchWorker.curre
     const rows = search.candidates.map((candidate) => ({ status: candidate.status, geometry: `${candidate.input.grainOuterDiameterMm}×${candidate.input.grainCoreDiameterMm}×${candidate.input.segmentLengthMm}/${candidate.input.segmentCount}`, massKg: candidate.grainMassKg, maximumPressureMpa: candidate.maximumPressureMpa, burnTimeSec: candidate.burnTimeSec, averageThrustN: candidate.averageThrustN, reasons: candidate.reasons.join(" ") }));
     const representative = selected ?? referenceCandidate;
     const metadata = search.metadata ?? { appVersion: "0.1.0", engineVersion: "candidate-search-1", calculatedAt: new Date().toISOString(), input: { ...config }, fuelMassToleranceKg: config.fuelMassToleranceKg, searchMode: mode, automaticExpansionStage: search.automaticExpansionStage, totalCombinations: search.totalCombinations, evaluatedCombinations: search.evaluatedCombinations, calculationFailures: search.calculationFailures, counts: { recommend: candidateCounts.pass, conditional: candidateCounts.conditional, referenceRejected: referenceCandidate ? 1 : 0, rejected: candidateCounts.fail }, baselineVersion: "SRM_2023.xls-baseline", gsrmReferenceVersion: "GSRM-engineering-targets-v1", anCatalogVersion: "AS568A-supplied-catalog", anCatalogItemCount: 241, status: "completed" as const };
-    const payload = { metadata, exportedAt: new Date().toISOString(), input: { ...config, fuelMassToleranceDisplay: formatMassTolerance(config.fuelMassToleranceKg), targetThrustText, targetThrustEnabled: targetThrustText.trim() !== "" }, search: { totalCombinations: search.totalCombinations, evaluatedCombinations: search.evaluatedCombinations, automaticExpansionStage: search.automaticExpansionStage ?? 0, searchEnvelope: search.searchEnvelope, warning: search.warning, diagnosis: search.diagnosis, counts: { recommend: candidateCounts.pass, conditional: candidateCounts.conditional, referenceRejected: referenceCandidate ? 1 : 0, rejected: candidateCounts.fail } }, candidates: rows, representativeCandidate: representative ? rows[search.candidates.indexOf(representative)] : null, selectedCandidates: comparison.map((candidate) => rows[search.candidates.indexOf(candidate)]), referenceCandidate: referenceCandidate ? rows[search.candidates.indexOf(referenceCandidate)] : null, referenceRule: "추천·조건부 후보가 없을 때만 목표 질량에 가장 가까운 탈락 후보 1개를 참고용으로 표시", gsrm: selected ? { referenceDiameterMm: gsrmReferenceDiameterMm, note: "선택 후보의 GSRM B 변환값. AN 검사는 화면에서 실행한 결과를 기준으로 합니다." } : null, an: anExportState ? { catalogSize: anExportState.total, query: anExportState.query, page: anExportState.page, pageCount: anExportState.pageCount, recommend: anExportState.recommend, conditional: anExportState.conditional, fail: anExportState.fail } : { catalogSize: 241, query: "미실행", page: 0, pageCount: 0, recommend: 0, conditional: 0, fail: 0 } };
+    const validation = { status: "NOT_RUN" as const, summary: "검산하지 않음 · 별도 검산 실행이 필요합니다.", fixtures: VALIDATION_FIXTURES.map(notRunValidation) };
+    const payload = { metadata, exportedAt: new Date().toISOString(), input: { ...config, fuelMassToleranceDisplay: formatMassTolerance(config.fuelMassToleranceKg), targetThrustText, targetThrustEnabled: targetThrustText.trim() !== "" }, search: { totalCombinations: search.totalCombinations, evaluatedCombinations: search.evaluatedCombinations, automaticExpansionStage: search.automaticExpansionStage ?? 0, searchEnvelope: search.searchEnvelope, warning: search.warning, diagnosis: search.diagnosis, counts: { recommend: candidateCounts.pass, conditional: candidateCounts.conditional, referenceRejected: referenceCandidate ? 1 : 0, rejected: candidateCounts.fail } }, candidates: rows, representativeCandidate: representative ? rows[search.candidates.indexOf(representative)] : null, selectedCandidates: comparison.map((candidate) => rows[search.candidates.indexOf(candidate)]), referenceCandidate: referenceCandidate ? rows[search.candidates.indexOf(referenceCandidate)] : null, referenceRule: "추천·조건부 후보가 없을 때만 목표 질량에 가장 가까운 탈락 후보 1개를 참고용으로 표시", gsrm: selected ? { referenceDiameterMm: gsrmReferenceDiameterMm, note: "선택 후보의 GSRM B 변환값. AN 검사는 화면에서 실행한 결과를 기준으로 합니다." } : null, an: anExportState ? { catalogSize: anExportState.total, query: anExportState.query, page: anExportState.page, pageCount: anExportState.pageCount, recommend: anExportState.recommend, conditional: anExportState.conditional, fail: anExportState.fail } : { catalogSize: 241, query: "미실행", page: 0, pageCount: 0, recommend: 0, conditional: 0, fail: 0 }, validation };
     const csvValue = (value: unknown) => JSON.stringify(value ?? "");
     const csvLines = [
       "# MotorFit export",
       `metadata,${csvValue(payload.metadata)}`,
       `input,${csvValue(payload.input)}`,
       `search,${csvValue(payload.search)}`,
+      `validation,${csvValue(payload.validation)}`,
       `referenceCandidate,${csvValue(payload.referenceCandidate)}`,
       `gsrm,${csvValue(payload.gsrm)}`,
       `an,${csvValue(payload.an)}`,
@@ -595,7 +601,7 @@ const requestCancel = () => { cancelRequested.current = true; searchWorker.curre
           </div>
 </div>
 <button type="button" onClick={() => runSearch(3)} disabled={running} className={`${automaticMode && mode !== "excel" ? "hidden" : "mt-6"} w-full rounded-xl bg-cyan-600 px-4 py-3 text-sm font-bold text-white shadow-lg shadow-cyan-600/20 transition hover:bg-cyan-700 disabled:cursor-wait disabled:opacity-60`}>{running ? "계산 중…" : mode === "excel" ? "Excel 재현 계산" : "상세 후보 탐색 실행"}</button>
-{running ? <div className="mt-3 rounded-2xl border-2 border-cyan-300 bg-cyan-50 px-3 py-3 text-xs text-cyan-950 shadow-sm"><div className="flex items-center justify-between gap-3"><span className="font-bold">실행 단계 {runningStage ?? "-"} / 3 · 계산 진행 중</span><span className="font-mono text-cyan-700">{Math.round(progressPercent)}%</span></div><div className="mt-2 h-2 overflow-hidden rounded-full bg-cyan-100"><div className="h-full rounded-full bg-cyan-600 transition-[width]" style={{ width: `${progressPercent}%` }} /></div><div className="mt-2 flex items-center justify-between gap-2"><span>{progressText}</span><button type="button" onClick={requestCancel} className="rounded-lg bg-cyan-700 px-3 py-1.5 font-bold text-white shadow-sm hover:bg-cyan-800">계산 취소</button></div></div> : cancelled ? <div className="mt-3 rounded-2xl border-2 border-amber-300 bg-amber-50 px-3 py-3 text-xs text-amber-950"><p className="font-bold">계산이 취소되었습니다.</p><p className="mt-1">마지막 완료 단계: {completedStage} / 3 · 입력을 확인한 뒤 다시 계산할 수 있습니다.</p></div> : null}
+{running ? <div className="mt-3 rounded-2xl border-2 border-cyan-300 bg-cyan-50 px-3 py-3 text-xs text-cyan-950 shadow-sm"><div className="flex items-center justify-between gap-3"><span className="font-bold">실행 단계 {runningStage ?? "-"} / 3 · 계산 진행 중</span><span className="font-mono text-cyan-700">{Math.round(progressPercent)}%</span></div><div className="mt-2 h-2 overflow-hidden rounded-full bg-cyan-100"><div className="h-full rounded-full bg-cyan-600 transition-[width]" style={{ width: `${progressPercent}%` }} /></div><div className="mt-2 flex items-center justify-between gap-2"><span>{progressText}</span><button type="button" onClick={requestCancel} className="rounded-lg bg-cyan-700 px-3 py-1.5 font-bold text-white shadow-sm hover:bg-cyan-800">계산 취소</button></div></div> : cancelled ? <div className="mt-3 rounded-2xl border-2 border-amber-300 bg-amber-50 px-3 py-3 text-xs text-amber-950"><p className="font-bold">계산이 취소되었습니다. <span className="font-mono">CANCELLED</span></p><p className="mt-1">마지막 완료 단계: {completedStage} / 3 · 입력을 확인한 뒤 다시 계산할 수 있습니다.</p></div> : lastCalculationStatus === "failed" ? <div className="mt-3 rounded-2xl border-2 border-rose-300 bg-rose-50 px-3 py-3 text-xs text-rose-950"><p className="font-bold">계산에 실패했습니다. <span className="font-mono">FAILED</span></p><p className="mt-1">입력과 탐색 범위를 확인한 뒤 다시 시도하세요.</p></div> : null}
 <p className="mt-3 text-center text-[11px] text-slate-400">계산은 버튼을 누를 때 브라우저에서 실행됩니다.</p>
         </aside>
         <section className="order-1 min-w-0 xl:order-2">{errorMessage ? <div className="mb-4 rounded-2xl border border-rose-200 bg-rose-50 px-4 py-3 text-sm leading-6 text-rose-800">
@@ -611,6 +617,7 @@ const requestCancel = () => { cancelRequested.current = true; searchWorker.curre
 <div className="rounded-3xl border border-cyan-200 bg-gradient-to-br from-cyan-50 to-white p-4 shadow-sm sm:p-5"><div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between"><div><p className="text-xs font-bold uppercase tracking-[0.14em] text-cyan-700">현재 계산 요약</p><h2 className="mt-1 text-lg font-bold text-slate-950">목표와 탐색 상태를 한눈에 확인하세요</h2></div><span className="rounded-full bg-slate-900 px-3 py-1 text-xs font-bold text-white">UI 단계 {completedStage}/3</span></div><div className="mt-4 grid grid-cols-2 gap-2 sm:grid-cols-4"><div className="rounded-2xl bg-white px-3 py-3 shadow-sm"><p className="text-[11px] font-semibold text-slate-500">목표 질량</p><p className="mt-1 text-base font-bold text-slate-950">{formatNumber(config.targetFuelMassKg, 4)} <span className="text-xs font-normal text-slate-500">kg</span></p></div><div className="rounded-2xl bg-white px-3 py-3 shadow-sm"><p className="text-[11px] font-semibold text-slate-500">최대 허용 압력</p><p className="mt-1 text-base font-bold text-slate-950">{formatNumber(config.maximumPressureMpa, 3)} <span className="text-xs font-normal text-slate-500">MPa</span></p></div><div className="rounded-2xl bg-white px-3 py-3 shadow-sm"><p className="text-[11px] font-semibold text-slate-500">목표 평균 추력</p><p className="mt-1 text-base font-bold text-slate-950">{targetThrustText.trim() === "" ? "미입력" : `${formatNumber(Number(targetThrustText), 2)} N`}</p></div><div className="rounded-2xl bg-white px-3 py-3 shadow-sm"><p className="text-[11px] font-semibold text-slate-500">자동 확장 단계</p><p className="mt-1 text-base font-bold text-violet-700">{search ? `${search.automaticExpansionStage ?? 0}단계` : "대기"}</p></div></div><p className="mt-3 text-[11px] text-slate-600">UI 입력 단계는 질량 → 압력 → 최종 추천의 완료 상태이고, 자동 확장 단계는 탐색 범위 확장 횟수입니다.</p></div>
 <p className="-mt-4 rounded-xl border border-cyan-100 bg-white px-3 py-2 text-xs text-slate-700">결과에 적용된 질량 허용 오차: <strong className="font-mono text-slate-950">{formatMassTolerance(config.fuelMassToleranceKg)}</strong></p>
 {search.metadata ? <details className="rounded-xl border border-slate-200 bg-white px-3 py-2 text-xs text-slate-700"><summary className="cursor-pointer font-bold text-slate-900">계산 재현 정보</summary><div className="mt-2 grid gap-1 sm:grid-cols-2"><span>엔진 버전: <b>{search.metadata.engineVersion}</b></span><span>앱 버전: <b>{search.metadata.appVersion}</b></span><span>계산 시각: <b>{search.metadata.calculatedAt}</b></span><span>상태: <b>{search.metadata.status === "completed" ? "완료" : search.metadata.status}</b></span><span>기준 예시: <b>{search.metadata.baselineVersion}</b></span><span>GSRM 기준: <b>{search.metadata.gsrmReferenceVersion}</b></span><span>AN 카탈로그: <b>{search.metadata.anCatalogItemCount}개 · {search.metadata.anCatalogVersion}</b></span><span>탐색 모드: <b>{search.metadata.searchMode}</b></span></div></details> : null}
+{search ? <details className="rounded-xl border border-violet-200 bg-violet-50 px-3 py-2 text-xs text-violet-950"><summary className="cursor-pointer font-bold">설계 검토 리포트</summary><div className="mt-2 space-y-1 leading-5"><p><b>검산 상태:</b> 검산하지 않음 · 별도 검산 실행이 필요합니다.</p><p>이 화면과 내보내기에는 입력 조건, 탐색 범위, 후보 판정, GSRM·AN 요약과 검산 대상 fixture 목록이 함께 기록됩니다.</p><p>자동 탐색은 전역 최적해를 보장하지 않으며, 결과는 실제 제작·점화 승인용이 아닌 교육·설계 검토용입니다.</p><p>검산 fixture: {VALIDATION_FIXTURES.length}개 · PASS로 간주하지 않음</p></div></details> : null}
 {targetThrustText.trim() === "" ? <p className="rounded-xl border border-slate-200 bg-slate-50 px-3 py-2 text-xs font-semibold text-slate-700">추력 목표가 비어 있어 MSE·최대 편차·추력 변동성·추력 점수는 계산하지 않습니다.</p> : null}
 {restoredFromStorage && !search ? <div className="rounded-2xl border border-sky-200 bg-sky-50 px-4 py-3 text-xs text-sky-900" role="status">저장된 입력값을 복원했습니다. 마지막 계산 결과는 현재 화면에 없으므로 다시 계산해 주세요.</div> : null}
 {search && calculatedSignature !== inputSignature ? <div className="rounded-2xl border-2 border-amber-300 bg-amber-50 px-4 py-3 text-xs text-amber-950" role="alert"><strong>재계산 필요</strong> · 입력값이 마지막 계산 결과와 달라졌습니다.</div> : null}

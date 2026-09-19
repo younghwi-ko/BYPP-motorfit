@@ -10,6 +10,10 @@ import {
   searchCandidates,
   searchCandidatesAsync,
   isWithinMassUpperBound,
+  VALIDATION_FIXTURES,
+  createValidationSearchConfig,
+  validateFixture,
+  notRunValidation,
 } from "../src/engine";
 import type { CandidateSearchConfig, PerformanceResult } from "../src/engine";
 
@@ -337,5 +341,27 @@ describe("automatic candidate envelope", () => {
     expect(isWithinMassUpperBound(1 + MASS_UPPER_EPSILON_KG * 2, 1)).toBe(false);
     const exactPressure = searchCandidates({ ...BASE_CONFIG, maximumPressureMpa: 5, targetThrustEnabled: false });
     expect(exactPressure.candidates.every((candidate) => candidate.maximumPressureMpa <= 5 || candidate.status === "fail")).toBe(true);
+  });
+
+  it("passes the shared SRM, nearest-rejected, and 2 kg golden validation fixtures", () => {
+    for (const fixture of VALIDATION_FIXTURES.filter((item) => item.targetFuelMassKg > 0)) {
+      const report = validateFixture(fixture, searchCandidates(createValidationSearchConfig(fixture)));
+      expect(report.status, `${fixture.name}: ${report.failedFields.join(", ")}`).toBe("PASS");
+    }
+  }, 120_000);
+
+  it("detects intentional numeric and representative mismatches", () => {
+    const fixture = VALIDATION_FIXTURES.find((item) => item.name === "참고용 탈락 0.763 kg")!;
+    const result = searchCandidates(createValidationSearchConfig(fixture));
+    const wrong = validateFixture({ ...fixture, expectedRepresentativeMassKg: 0.8, expectedRepresentativeGeometry: "40×10×75/2" }, result);
+    expect(wrong.status).toBe("FAIL");
+    expect(wrong.failedFields).toEqual(expect.arrayContaining(["대표 형상", "대표 질량"]));
+  });
+
+  it("does not mark an unrun validation as PASS", () => {
+    const report = notRunValidation(VALIDATION_FIXTURES[0]);
+    expect(report.status).toBe("NOT_RUN");
+    expect(report.failedFields).toEqual([]);
+    expect(report.summary).toContain("검산하지 않음");
   });
 });
