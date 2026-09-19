@@ -384,6 +384,12 @@ const requestCancel = () => { cancelRequested.current = true; searchWorker.curre
   const closestFailedCandidate = useMemo(() => {
     return search?.nearestRejectedCandidate ?? null;
   }, [search]);
+  const hasValidCandidate = Boolean(search?.candidates.some((candidate) => candidate.status !== "fail"));
+  const isReferenceCandidate = Boolean(selected && closestFailedCandidate === selected && !hasValidCandidate);
+  const selectedDetailTitle = selected
+    ? isReferenceCandidate ? "참고용 탈락 후보 상세" : selected.status === "pass" ? "추천 후보 상세" : selected.status === "conditional" ? "조건부 후보 상세" : "탈락 후보 상세"
+    : "후보 상세";
+  const openCandidateDetails = (candidate: CandidateResult) => setSelected(candidate);
   const toggleComparison = (candidate: CandidateResult) => setComparison((current) => current.some((item) => item === candidate) ? current.filter((item) => item !== candidate) : current.length >= 3 ? current : [...current, candidate]);
   const downloadExport = (format: "csv" | "json") => {
     if (!search) return;
@@ -592,7 +598,7 @@ const requestCancel = () => { cancelRequested.current = true; searchWorker.curre
 <p className="font-bold">{search.diagnosis ?? "조건을 만족한 후보가 없습니다."}</p>
 <p className="mt-1">자동 탐색 범위, 질량 오차, 압력 제한과 목표 추력 조건을 확인하고 상세 설정에서 허용 오차를 조정해보세요.</p>
 </div> : null}<div className="rounded-2xl border border-slate-200 bg-white px-4 py-3 text-xs leading-5 text-slate-600">
-{search.candidates.length > 0 && !search.candidates.some((candidate) => candidate.status !== "fail") && closestFailedCandidate ? <div className="mb-3 rounded-2xl border border-violet-200 bg-violet-50 px-3 py-3 text-violet-950"><div className="flex items-center gap-2"><StatusPill status="fail" reference /><span className="font-bold">참고용 탈락 후보</span></div><p className="mt-1 text-xs">추천 후보가 아니며, 목표 질량에 가장 가까운 탈락 후보입니다.</p><p className="mt-2 font-semibold">Do {closestFailedCandidate.input.grainOuterDiameterMm} × do {closestFailedCandidate.input.grainCoreDiameterMm} × Lo {closestFailedCandidate.input.segmentLengthMm} / {closestFailedCandidate.input.segmentCount} · {formatNumber(closestFailedCandidate.grainMassKg, 4)} kg · {closestFailedCandidate.reasons.join(" ")}</p></div> : null}
+{search.candidates.length > 0 && !search.candidates.some((candidate) => candidate.status !== "fail") && closestFailedCandidate ? <div className="mb-3 rounded-2xl border border-violet-200 bg-violet-50 px-3 py-3 text-violet-950"><div className="flex items-center gap-2"><StatusPill status="fail" reference /><span className="font-bold">참고용 탈락 후보</span></div><p className="mt-1 text-xs">추천 후보가 아니며, 목표 질량에 가장 가까운 탈락 후보입니다.</p><p className="mt-2 font-semibold">Do {closestFailedCandidate.input.grainOuterDiameterMm} × do {closestFailedCandidate.input.grainCoreDiameterMm} × Lo {closestFailedCandidate.input.segmentLengthMm} / {closestFailedCandidate.input.segmentCount} · {formatNumber(closestFailedCandidate.grainMassKg, 4)} kg · {closestFailedCandidate.reasons.join(" ")}</p><button type="button" aria-label="참고용 탈락 후보 상세 보기" onClick={() => openCandidateDetails(closestFailedCandidate)} className="mt-3 rounded-lg bg-violet-700 px-3 py-2 text-xs font-bold text-white hover:bg-violet-800 focus:outline-none focus:ring-2 focus:ring-violet-500">상세 보기</button></div> : null}
 <p className="font-bold text-slate-900">점수 기준 안내</p>
 <p className="mt-1">{SCORE_GUIDANCE}</p>
 <p className="mt-1 text-slate-500">질량 오차와 압력 제한을 기본으로 평가하고, 목표 추력 입력 시 추력 곡선 오차를 추가합니다.</p>
@@ -611,6 +617,7 @@ const requestCancel = () => { cancelRequested.current = true; searchWorker.curre
 <SortHeader label="연소시간" sortKey="burnTime" activeKey={sortKey} direction={sortDirection} onSort={toggleSort} />
 <SortHeader label="평균추력" sortKey="averageThrust" activeKey={sortKey} direction={sortDirection} onSort={toggleSort} />
 <SortHeader label="점수" sortKey="score" activeKey={sortKey} direction={sortDirection} onSort={toggleSort} />
+<th className="px-4 py-3">상세</th>
 <th className="px-4 py-3">비교</th>
 </tr>
 </thead>
@@ -624,20 +631,22 @@ const requestCancel = () => { cancelRequested.current = true; searchWorker.curre
 <td className="px-4 py-3 font-mono font-semibold text-slate-900">{formatNumber(candidate.burnTimeSec, 4)} <span className="font-sans text-xs text-slate-700">s</span></td>
 <td className="px-4 py-3 font-mono font-semibold text-slate-900">{formatNumber(candidate.averageThrustN, 2)} <span className="font-sans text-xs text-slate-700">N</span></td>
 <td className="px-4 py-3 font-mono font-black text-cyan-800">{formatNumber(candidate.score.totalScore, 1)}</td>
+<td className="px-4 py-3"><button type="button" aria-label={`${candidate.input.grainOuterDiameterMm} ${candidate.input.grainCoreDiameterMm} ${candidate.input.segmentLengthMm} 상세 보기`} onClick={(event) => { event.stopPropagation(); openCandidateDetails(candidate); }} className="rounded-lg bg-cyan-700 px-2.5 py-1.5 text-[11px] font-bold text-white hover:bg-cyan-800 focus:outline-none focus:ring-2 focus:ring-cyan-500">상세 보기</button></td>
 <td className="px-4 py-3"><button type="button" aria-label="비교 후보 선택" onClick={(event) => { event.stopPropagation(); toggleComparison(candidate); }} className="rounded-lg border border-cyan-300 px-2 py-1 text-[11px] font-bold text-cyan-800 focus:outline-none focus:ring-2 focus:ring-cyan-500">{comparison.some((item) => item === candidate) ? "해제" : "비교"}</button></td>
 </tr>)}</tbody>
 </table>
 </div>
-<div className="divide-y divide-slate-100 sm:hidden">{visibleCandidates.slice(0, 8).map((candidate) => <div key={`${candidate.input.grainOuterDiameterMm}-${candidate.input.grainCoreDiameterMm}-${candidate.input.segmentLengthMm}-${candidate.input.segmentCount}`} className={`w-full p-4 ${candidate.status === "fail" ? "opacity-75" : ""}`}><button type="button" disabled={candidate.status === "fail"} onClick={() => setSelected(candidate)} className="block w-full text-left focus:outline-none focus:ring-2 focus:ring-cyan-500"><div className="flex items-center justify-between gap-3"><StatusPill status={candidate.status} reference={candidate === search.nearestRejectedCandidate} /><span className="font-bold text-slate-800">{candidate.input.grainOuterDiameterMm} × {candidate.input.grainCoreDiameterMm} × {candidate.input.segmentLengthMm} / {candidate.input.segmentCount}</span></div><div className="mt-2 grid grid-cols-3 gap-2 text-[11px] text-slate-500"><span>질량<br /><strong className="text-slate-800">{formatNumber(candidate.grainMassKg, 4)} kg</strong></span><span>최대압력<br /><strong className="text-slate-800">{formatNumber(candidate.maximumPressureMpa, 3)} MPa</strong></span><span>평균추력<br /><strong className="text-slate-800">{formatNumber(candidate.averageThrustN, 1)} N</strong></span></div></button><button type="button" onClick={() => toggleComparison(candidate)} className="mt-2 rounded-lg border border-cyan-300 px-2 py-1 text-[11px] font-bold text-cyan-800 focus:outline-none focus:ring-2 focus:ring-cyan-500">{comparison.some((item) => item === candidate) ? "비교 해제" : "비교에 추가"}</button></div>)}</div>
+<div className="divide-y divide-slate-100 sm:hidden">{visibleCandidates.slice(0, 8).map((candidate) => <div key={`${candidate.input.grainOuterDiameterMm}-${candidate.input.grainCoreDiameterMm}-${candidate.input.segmentLengthMm}-${candidate.input.segmentCount}`} className={`w-full p-4 ${candidate.status === "fail" ? "opacity-75" : ""}`}><button type="button" disabled={candidate.status === "fail"} onClick={() => setSelected(candidate)} className="block w-full text-left focus:outline-none focus:ring-2 focus:ring-cyan-500"><div className="flex items-center justify-between gap-3"><StatusPill status={candidate.status} reference={candidate === search.nearestRejectedCandidate} /><span className="font-bold text-slate-800">{candidate.input.grainOuterDiameterMm} × {candidate.input.grainCoreDiameterMm} × {candidate.input.segmentLengthMm} / {candidate.input.segmentCount}</span></div><div className="mt-2 grid grid-cols-3 gap-2 text-[11px] text-slate-500"><span>질량<br /><strong className="text-slate-800">{formatNumber(candidate.grainMassKg, 4)} kg</strong></span><span>최대압력<br /><strong className="text-slate-800">{formatNumber(candidate.maximumPressureMpa, 3)} MPa</strong></span><span>평균추력<br /><strong className="text-slate-800">{formatNumber(candidate.averageThrustN, 1)} N</strong></span></div></button><div className="mt-2 flex flex-wrap gap-2"><button type="button" onClick={() => openCandidateDetails(candidate)} className="rounded-lg bg-cyan-700 px-2 py-1 text-[11px] font-bold text-white focus:outline-none focus:ring-2 focus:ring-cyan-500">상세 보기</button><button type="button" onClick={() => toggleComparison(candidate)} className="rounded-lg border border-cyan-300 px-2 py-1 text-[11px] font-bold text-cyan-800 focus:outline-none focus:ring-2 focus:ring-cyan-500">{comparison.some((item) => item === candidate) ? "비교 해제" : "비교에 추가"}</button></div></div>)}</div>
 </div>{selected ? <div className="space-y-6">
 <div className="flex items-center justify-between">
 <div>
-<p className="text-xs font-bold tracking-[0.18em] text-cyan-700 uppercase">Selected candidate</p>
+<p className="text-xs font-bold tracking-[0.18em] text-cyan-700 uppercase">{selectedDetailTitle}</p>
 <h2 className="mt-1 text-2xl font-bold text-slate-950">Do {selected.input.grainOuterDiameterMm} · do {selected.input.grainCoreDiameterMm} · Lo {selected.input.segmentLengthMm} mm</h2>
 <p className="mt-1 text-sm text-slate-500">{selected.input.segmentCount} segments · {selected.motorClass}-class · 종합 점수 {formatNumber(selected.score.totalScore, 1)}</p>
 </div>
 <StatusPill status={selected.status} />
 </div>
+{isReferenceCandidate ? <div className="rounded-2xl border-2 border-violet-300 bg-violet-50 px-4 py-3 text-sm font-semibold leading-6 text-violet-950" role="note">참고용 탈락 후보입니다. 추천·조건부 후보가 아니며, 목표 질량에 가장 가까운 탈락 후보를 비교하기 위한 참고값입니다.</div> : null}
 <div className="rounded-2xl border border-violet-100 bg-violet-50/60 px-4 py-3">
 <div className="flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between">
 <div>

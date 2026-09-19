@@ -107,3 +107,32 @@ test("초보자 사용 설명서와 메인 화면 이동", async ({ page }) => {
   await page.goto("/");
   await expect(page.getByRole("link", { name: "사용 설명서 열기" })).toBeVisible();
 });
+
+test("후보 유형별 상세보기와 비교 선택 분리", async ({ page }) => {
+  await page.addInitScript(() => localStorage.clear());
+  await page.goto("/");
+  await page.waitForTimeout(5000);
+  await calculate(page, "0.763", "3.8", "310");
+  await expect(page.getByText(/Do 55 × do 20 × Lo 105 \/ 2/)).toBeVisible();
+  const detailButtons = page.getByRole("button", { name: /상세 보기/ });
+  expect(await detailButtons.count()).toBeGreaterThan(0);
+  await detailButtons.first().click();
+  await expect(page.getByText(/추천 후보 상세|조건부 후보 상세|탈락 후보 상세|참고용 탈락 후보 상세/)).toBeVisible();
+  const comparisonButton = page.getByRole("button", { name: "비교 후보 선택" }).first();
+  await comparisonButton.click();
+  await expect(page.getByText(/선택 후보 비교 \(1\/3\)/)).toBeVisible();
+  await expect(page.getByText(/추천 후보 상세|조건부 후보 상세|탈락 후보 상세|참고용 탈락 후보 상세/)).toBeVisible();
+});
+
+test("2.000 kg 참고용 탈락 후보 상세보기", async ({ page }) => {
+  await page.addInitScript(() => localStorage.clear());
+  await page.goto("/");
+  await page.waitForTimeout(5000);
+  await calculate(page, "2.000", "4.0", "");
+  const referenceCard = page.getByText("추천 후보가 아니며, 목표 질량에 가장 가까운 탈락 후보입니다.", { exact: true }).locator("..");
+  const referenceButton = referenceCard.getByRole("button", { name: "상세 보기" });
+  await expect(referenceButton).toBeVisible();
+  await referenceButton.click();
+  await expect(page.getByText("참고용 탈락 후보 상세", { exact: true })).toBeVisible();
+  await expect(page.getByText("참고용 탈락 후보입니다.")).toBeVisible();
+});
