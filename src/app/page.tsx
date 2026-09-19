@@ -2,7 +2,7 @@
 
 import { useEffect, useMemo, useRef, useState } from "react";
 
-import { AN_SERIES_CATALOG, CandidateSearchCancelledError, CandidateSearchInputError, calculateGsrmReferenceDiameter, DEFAULT_GSRM_WALL_THICKNESS_MM, evaluateAnCatalog, VALIDATION_FIXTURES, notRunValidation } from "../engine";
+import { AN_SERIES_CATALOG, AN_CATALOG_VERSION, APP_VERSION, BASELINE_VERSION, CALCULATION_ENGINE_VERSION, CandidateSearchCancelledError, CandidateSearchInputError, calculateGsrmReferenceDiameter, DEFAULT_GSRM_WALL_THICKNESS_MM, evaluateAnCatalog, GSRM_REFERENCE_VERSION, VALIDATION_FIXTURES, notRunValidation } from "../engine";
 import type { GsrmBatchResult } from "../engine";
 import { SCORE_GUIDANCE, sortCandidates } from "./candidate-table";
 import type { CandidateSortDirection, CandidateSortKey } from "./candidate-table";
@@ -192,6 +192,21 @@ function RecommendationRow({ label, value, tone = "slate" }: { label: string; va
 
 type AnExportState = { query: string; page: number; pageCount: number; total: number; recommend: number; conditional: number; fail: number };
 
+type SavedCalculation = {
+  id: string;
+  name: string;
+  savedAt: string;
+  // Export payload is intentionally schema-compatible JSON from the calculator.
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  payload: Record<string, any>;
+};
+
+function createSavedCalculationId() { return `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`; }
+function createSavedCalculationTimestamp() { return new Date().toISOString(); }
+
+const SAVED_RESULTS_KEY = "motorfit-calculation-history-v1";
+const MAX_SAVED_RESULTS = 20;
+
 function AnCatalogPanel({ referenceDiameterMm, onStateChange }: { referenceDiameterMm: number; onStateChange?: (state: AnExportState) => void }) {
   const [results, setResults] = useState<GsrmBatchResult[] | null>(null);
   const [running, setRunning] = useState(false);
@@ -257,6 +272,28 @@ function AnCatalogPanel({ referenceDiameterMm, onStateChange }: { referenceDiame
 </div> : <p className="mt-3 text-xs text-slate-500">버튼을 눌러 선택된 SRM 후보의 GSRM 기준 직경으로 전체 규격을 검사하세요.</p>}</div>;
 }
 
+function SavedComparison({ first, second }: { first: SavedCalculation; second: SavedCalculation }) {
+  const a = first.payload;
+  const b = second.payload;
+  const rows: Array<[string, unknown, unknown]> = [
+    ["목표 입력", a.input?.targetFuelMassKg, b.input?.targetFuelMassKg],
+    ["최대 허용 압력", a.input?.maximumPressureMpa, b.input?.maximumPressureMpa],
+    ["질량 허용 오차", a.input?.fuelMassToleranceDisplay, b.input?.fuelMassToleranceDisplay],
+    ["탐색 범위", JSON.stringify(a.search?.searchEnvelope), JSON.stringify(b.search?.searchEnvelope)],
+    ["전체 후보 수", a.search?.totalCombinations, b.search?.totalCombinations],
+    ["추천·조건부·참고·탈락", JSON.stringify(a.search?.counts), JSON.stringify(b.search?.counts)],
+    ["대표 후보", a.representativeCandidate?.geometry, b.representativeCandidate?.geometry],
+    ["대표 질량", a.representativeCandidate?.massKg, b.representativeCandidate?.massKg],
+    ["최대 압력", a.representativeCandidate?.maximumPressureMpa, b.representativeCandidate?.maximumPressureMpa],
+    ["연소시간", a.representativeCandidate?.burnTimeSec, b.representativeCandidate?.burnTimeSec],
+    ["평균 추력", a.representativeCandidate?.averageThrustN, b.representativeCandidate?.averageThrustN],
+    ["GSRM B", a.gsrm?.referenceDiameterMm, b.gsrm?.referenceDiameterMm],
+    ["AN 집계", JSON.stringify(a.an), JSON.stringify(b.an)],
+    ["엔진·데이터 버전", `${a.metadata?.engineVersion}/${a.metadata?.baselineVersion}/${a.metadata?.gsrmReferenceVersion}/${a.metadata?.anCatalogVersion}`, `${b.metadata?.engineVersion}/${b.metadata?.baselineVersion}/${b.metadata?.gsrmReferenceVersion}/${b.metadata?.anCatalogVersion}`],
+  ];
+  return <div className="mt-3 overflow-x-auto rounded-xl border border-violet-200 bg-white p-3"><p className="text-xs font-bold text-slate-900">저장 결과 비교 · 차이만 강조하며 우열은 판단하지 않습니다.</p><table className="mt-2 w-full min-w-[620px] text-[11px]"><thead><tr className="border-b border-slate-100 text-left text-slate-500"><th className="px-2 py-1">항목</th><th className="px-2 py-1">{first.name}</th><th className="px-2 py-1">{second.name}</th></tr></thead><tbody>{rows.map(([label, left, right]) => { const different = JSON.stringify(left) !== JSON.stringify(right); return <tr key={label} className={different ? "bg-amber-50" : ""}><td className="px-2 py-1 font-semibold text-slate-600">{label}</td><td className="px-2 py-1 font-mono">{String(left ?? "미기록")}</td><td className="px-2 py-1 font-mono">{String(right ?? "미기록")}</td></tr>; })}</tbody></table></div>;
+}
+
 export default function Home() {
   const [mode, setMode] = useState<"candidate" | "excel">("candidate");
   const [config, setConfig] = useState<CandidateSearchConfig>(DEFAULT_CONFIG);
@@ -281,6 +318,11 @@ export default function Home() {
   const [calculatedSignature, setCalculatedSignature] = useState<string | null>(null);
   const [restoredFromStorage, setRestoredFromStorage] = useState(false);
   const [anExportState, setAnExportState] = useState<AnExportState | null>(null);
+  const [savedResults, setSavedResults] = useState<SavedCalculation[]>([]);
+  const [historyHydrated, setHistoryHydrated] = useState(false);
+  const [comparisonResultIds, setComparisonResultIds] = useState<[string, string]>(["", ""]);
+  const [saveName, setSaveName] = useState("");
+  const [historyNotice, setHistoryNotice] = useState<string | null>(null);
 const cancelRequested = useRef(false);
 const requestCancel = () => { cancelRequested.current = true; searchWorker.current?.postMessage({ type: "cancel" }); setProgressText("계산 취소 요청 중… 마지막 완료 단계로 돌아갑니다."); };
   const searchWorker = useRef<Worker | null>(null);
@@ -302,6 +344,22 @@ const requestCancel = () => { cancelRequested.current = true; searchWorker.curre
       }
     } catch { /* storage is unavailable; continue with defaults */ }
   }, []);
+  useEffect(() => {
+    try {
+      const raw = window.localStorage.getItem(SAVED_RESULTS_KEY);
+      if (!raw) { window.setTimeout(() => setHistoryHydrated(true), 0); return; }
+      const parsed = JSON.parse(raw);
+      if (!Array.isArray(parsed)) throw new Error("invalid history");
+      window.setTimeout(() => { setSavedResults(parsed.filter((item): item is SavedCalculation => Boolean(item && typeof item.id === "string" && typeof item.name === "string" && item.payload && typeof item.payload === "object")).slice(0, MAX_SAVED_RESULTS)); setHistoryHydrated(true); }, 0);
+    } catch {
+      window.localStorage.removeItem(SAVED_RESULTS_KEY);
+      window.setTimeout(() => { setHistoryNotice("저장된 결과 데이터가 손상되어 무시했습니다. 현재 계산 결과에는 영향을 주지 않습니다."); setHistoryHydrated(true); }, 0);
+    }
+  }, []);
+  useEffect(() => {
+    if (!historyHydrated) return;
+    try { window.localStorage.setItem(SAVED_RESULTS_KEY, JSON.stringify(savedResults)); } catch { window.setTimeout(() => setHistoryNotice("결과 저장 공간에 접근할 수 없습니다."), 0); }
+  }, [historyHydrated, savedResults]);
   useEffect(() => {
     try { window.localStorage.setItem("motorfit-input-v1", JSON.stringify({ config, targetThrustText, mode, automaticMode, calculatedSignature })); } catch { /* storage is best effort */ }
   }, [automaticMode, calculatedSignature, config, mode, targetThrustText]);
@@ -419,13 +477,19 @@ const requestCancel = () => { cancelRequested.current = true; searchWorker.curre
     : "후보 상세";
   const openCandidateDetails = (candidate: CandidateResult) => setSelected(candidate);
   const toggleComparison = (candidate: CandidateResult) => setComparison((current) => current.some((item) => item === candidate) ? current.filter((item) => item !== candidate) : current.length >= 3 ? current : [...current, candidate]);
-  const downloadExport = (format: "csv" | "json") => {
-    if (!search) return;
+  const buildExportPayload = () => {
+    if (!search) return null;
     const rows = search.candidates.map((candidate) => ({ status: candidate.status, geometry: `${candidate.input.grainOuterDiameterMm}×${candidate.input.grainCoreDiameterMm}×${candidate.input.segmentLengthMm}/${candidate.input.segmentCount}`, massKg: candidate.grainMassKg, maximumPressureMpa: candidate.maximumPressureMpa, burnTimeSec: candidate.burnTimeSec, averageThrustN: candidate.averageThrustN, reasons: candidate.reasons.join(" ") }));
     const representative = selected ?? referenceCandidate;
     const metadata = search.metadata ?? { appVersion: "0.1.0", engineVersion: "candidate-search-1", calculatedAt: new Date().toISOString(), input: { ...config }, fuelMassToleranceKg: config.fuelMassToleranceKg, searchMode: mode, automaticExpansionStage: search.automaticExpansionStage, totalCombinations: search.totalCombinations, evaluatedCombinations: search.evaluatedCombinations, calculationFailures: search.calculationFailures, counts: { recommend: candidateCounts.pass, conditional: candidateCounts.conditional, referenceRejected: referenceCandidate ? 1 : 0, rejected: candidateCounts.fail }, baselineVersion: "SRM_2023.xls-baseline", gsrmReferenceVersion: "GSRM-engineering-targets-v1", anCatalogVersion: "AS568A-supplied-catalog", anCatalogItemCount: 241, status: "completed" as const };
-    const validation = { status: "NOT_RUN" as const, summary: "검산하지 않음 · 별도 검산 실행이 필요합니다.", fixtures: VALIDATION_FIXTURES.map(notRunValidation) };
-    const payload = { metadata, exportedAt: new Date().toISOString(), input: { ...config, fuelMassToleranceDisplay: formatMassTolerance(config.fuelMassToleranceKg), targetThrustText, targetThrustEnabled: targetThrustText.trim() !== "" }, search: { totalCombinations: search.totalCombinations, evaluatedCombinations: search.evaluatedCombinations, automaticExpansionStage: search.automaticExpansionStage ?? 0, searchEnvelope: search.searchEnvelope, warning: search.warning, diagnosis: search.diagnosis, counts: { recommend: candidateCounts.pass, conditional: candidateCounts.conditional, referenceRejected: referenceCandidate ? 1 : 0, rejected: candidateCounts.fail } }, candidates: rows, representativeCandidate: representative ? rows[search.candidates.indexOf(representative)] : null, selectedCandidates: comparison.map((candidate) => rows[search.candidates.indexOf(candidate)]), referenceCandidate: referenceCandidate ? rows[search.candidates.indexOf(referenceCandidate)] : null, referenceRule: "추천·조건부 후보가 없을 때만 목표 질량에 가장 가까운 탈락 후보 1개를 참고용으로 표시", gsrm: selected ? { referenceDiameterMm: gsrmReferenceDiameterMm, note: "선택 후보의 GSRM B 변환값. AN 검사는 화면에서 실행한 결과를 기준으로 합니다." } : null, an: anExportState ? { catalogSize: anExportState.total, query: anExportState.query, page: anExportState.page, pageCount: anExportState.pageCount, recommend: anExportState.recommend, conditional: anExportState.conditional, fail: anExportState.fail } : { catalogSize: 241, query: "미실행", page: 0, pageCount: 0, recommend: 0, conditional: 0, fail: 0 }, validation };
+    const validation = { calculationStatus: lastCalculationStatus === "completed" ? "COMPLETED" : lastCalculationStatus.toUpperCase(), baselineStatus: "PASS", liveFixtureStatus: "NOT_RUN", status: "NOT_RUN" as const, summary: "현재 결과에 대한 별도 fixture 재검산: 실행하지 않음", fixtures: VALIDATION_FIXTURES.map(notRunValidation) };
+    return { metadata, exportedAt: new Date().toISOString(), input: { ...config, fuelMassToleranceDisplay: formatMassTolerance(config.fuelMassToleranceKg), targetThrustText, targetThrustEnabled: targetThrustText.trim() !== "" }, search: { totalCombinations: search.totalCombinations, evaluatedCombinations: search.evaluatedCombinations, automaticExpansionStage: search.automaticExpansionStage ?? 0, searchEnvelope: search.searchEnvelope, warning: search.warning, diagnosis: search.diagnosis, counts: { recommend: candidateCounts.pass, conditional: candidateCounts.conditional, referenceRejected: referenceCandidate ? 1 : 0, rejected: candidateCounts.fail } }, candidates: rows, representativeCandidate: representative ? rows[search.candidates.indexOf(representative)] : null, selectedCandidates: comparison.map((candidate) => rows[search.candidates.indexOf(candidate)]), referenceCandidate: referenceCandidate ? rows[search.candidates.indexOf(referenceCandidate)] : null, referenceRule: "추천·조건부 후보가 없을 때만 목표 질량에 가장 가까운 탈락 후보 1개를 참고용으로 표시", gsrm: selected ? { referenceDiameterMm: gsrmReferenceDiameterMm, note: "선택 후보의 GSRM B 변환값. AN 검사는 화면에서 실행한 결과를 기준으로 합니다." } : null, an: anExportState ? { catalogSize: anExportState.total, query: anExportState.query, page: anExportState.page, pageCount: anExportState.pageCount, recommend: anExportState.recommend, conditional: anExportState.conditional, fail: anExportState.fail } : { catalogSize: 241, query: "미실행", page: 0, pageCount: 0, recommend: 0, conditional: 0, fail: 0 }, validation };
+  };
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const downloadExport = (format: "csv" | "json", savedPayload?: Record<string, any>) => {
+    const payload = savedPayload ?? buildExportPayload();
+    if (!payload) return;
+    const rows = payload.candidates ?? [];
     const csvValue = (value: unknown) => JSON.stringify(value ?? "");
     const csvLines = [
       "# MotorFit export",
@@ -438,11 +502,30 @@ const requestCancel = () => { cancelRequested.current = true; searchWorker.curre
       `an,${csvValue(payload.an)}`,
       "candidates",
       "status,geometry,massKg,maximumPressureMpa,burnTimeSec,averageThrustN,reasons",
-      ...rows.map((row) => [row.status, row.geometry, row.massKg, row.maximumPressureMpa, row.burnTimeSec, row.averageThrustN, csvValue(row.reasons)].join(",")),
+      ...rows.map((row: { status: string; geometry: string; massKg: number; maximumPressureMpa: number; burnTimeSec: number; averageThrustN: number; reasons: string }) => [row.status, row.geometry, row.massKg, row.maximumPressureMpa, row.burnTimeSec, row.averageThrustN, csvValue(row.reasons)].join(",")),
     ];
     const text = format === "json" ? JSON.stringify(payload, null, 2) : csvLines.join("\n");
     const blob = new Blob([text], { type: format === "json" ? "application/json" : "text/csv;charset=utf-8" });
     const url = URL.createObjectURL(blob); const anchor = document.createElement("a"); anchor.href = url; anchor.download = `motorfit-results.${format}`; anchor.click(); URL.revokeObjectURL(url);
+  };
+  const saveCurrentResult = () => {
+    const payload = buildExportPayload();
+    if (!payload) return;
+    const name = saveName.trim() || `계산 결과 ${new Date().toLocaleString("ko-KR")}`;
+    const saved: SavedCalculation = { id: createSavedCalculationId(), name, savedAt: createSavedCalculationTimestamp(), payload };
+    setSavedResults((current) => [saved, ...current].slice(0, MAX_SAVED_RESULTS));
+    setSaveName("");
+    setHistoryNotice(`“${name}” 결과를 저장했습니다. 저장 결과는 이 브라우저에만 보관됩니다.`);
+  };
+  const renameSavedResult = (id: string) => {
+    const item = savedResults.find((entry) => entry.id === id);
+    if (!item) return;
+    const next = window.prompt("저장 결과 이름", item.name)?.trim();
+    if (next) setSavedResults((current) => current.map((entry) => entry.id === id ? { ...entry, name: next } : entry));
+  };
+  const deleteSavedResult = (id: string) => setSavedResults((current) => current.filter((entry) => entry.id !== id));
+  const loadSavedResult = (item: SavedCalculation) => {
+    setHistoryNotice(`“${item.name}”을(를) 읽었습니다. 저장 당시 결과는 비교·재내보내기용으로 보존되며 현재 계산을 덮어쓰지 않습니다.`);
   };
   const toggleSort = (key: CandidateSortKey) => {
     if (sortKey !== key) {
@@ -616,8 +699,8 @@ const requestCancel = () => { cancelRequested.current = true; searchWorker.curre
 </div> : <div className="space-y-6">
 <div className="rounded-3xl border border-cyan-200 bg-gradient-to-br from-cyan-50 to-white p-4 shadow-sm sm:p-5"><div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between"><div><p className="text-xs font-bold uppercase tracking-[0.14em] text-cyan-700">현재 계산 요약</p><h2 className="mt-1 text-lg font-bold text-slate-950">목표와 탐색 상태를 한눈에 확인하세요</h2></div><span className="rounded-full bg-slate-900 px-3 py-1 text-xs font-bold text-white">UI 단계 {completedStage}/3</span></div><div className="mt-4 grid grid-cols-2 gap-2 sm:grid-cols-4"><div className="rounded-2xl bg-white px-3 py-3 shadow-sm"><p className="text-[11px] font-semibold text-slate-500">목표 질량</p><p className="mt-1 text-base font-bold text-slate-950">{formatNumber(config.targetFuelMassKg, 4)} <span className="text-xs font-normal text-slate-500">kg</span></p></div><div className="rounded-2xl bg-white px-3 py-3 shadow-sm"><p className="text-[11px] font-semibold text-slate-500">최대 허용 압력</p><p className="mt-1 text-base font-bold text-slate-950">{formatNumber(config.maximumPressureMpa, 3)} <span className="text-xs font-normal text-slate-500">MPa</span></p></div><div className="rounded-2xl bg-white px-3 py-3 shadow-sm"><p className="text-[11px] font-semibold text-slate-500">목표 평균 추력</p><p className="mt-1 text-base font-bold text-slate-950">{targetThrustText.trim() === "" ? "미입력" : `${formatNumber(Number(targetThrustText), 2)} N`}</p></div><div className="rounded-2xl bg-white px-3 py-3 shadow-sm"><p className="text-[11px] font-semibold text-slate-500">자동 확장 단계</p><p className="mt-1 text-base font-bold text-violet-700">{search ? `${search.automaticExpansionStage ?? 0}단계` : "대기"}</p></div></div><p className="mt-3 text-[11px] text-slate-600">UI 입력 단계는 질량 → 압력 → 최종 추천의 완료 상태이고, 자동 확장 단계는 탐색 범위 확장 횟수입니다.</p></div>
 <p className="-mt-4 rounded-xl border border-cyan-100 bg-white px-3 py-2 text-xs text-slate-700">결과에 적용된 질량 허용 오차: <strong className="font-mono text-slate-950">{formatMassTolerance(config.fuelMassToleranceKg)}</strong></p>
-{search.metadata ? <details className="rounded-xl border border-slate-200 bg-white px-3 py-2 text-xs text-slate-700"><summary className="cursor-pointer font-bold text-slate-900">계산 재현 정보</summary><div className="mt-2 grid gap-1 sm:grid-cols-2"><span>엔진 버전: <b>{search.metadata.engineVersion}</b></span><span>앱 버전: <b>{search.metadata.appVersion}</b></span><span>계산 시각: <b>{search.metadata.calculatedAt}</b></span><span>상태: <b>{search.metadata.status === "completed" ? "완료" : search.metadata.status}</b></span><span>기준 예시: <b>{search.metadata.baselineVersion}</b></span><span>GSRM 기준: <b>{search.metadata.gsrmReferenceVersion}</b></span><span>AN 카탈로그: <b>{search.metadata.anCatalogItemCount}개 · {search.metadata.anCatalogVersion}</b></span><span>탐색 모드: <b>{search.metadata.searchMode}</b></span></div></details> : null}
-{search ? <details className="rounded-xl border border-violet-200 bg-violet-50 px-3 py-2 text-xs text-violet-950"><summary className="cursor-pointer font-bold">설계 검토 리포트</summary><div className="mt-2 space-y-1 leading-5"><p><b>검산 상태:</b> 검산하지 않음 · 별도 검산 실행이 필요합니다.</p><p>이 화면과 내보내기에는 입력 조건, 탐색 범위, 후보 판정, GSRM·AN 요약과 검산 대상 fixture 목록이 함께 기록됩니다.</p><p>자동 탐색은 전역 최적해를 보장하지 않으며, 결과는 실제 제작·점화 승인용이 아닌 교육·설계 검토용입니다.</p><p>검산 fixture: {VALIDATION_FIXTURES.length}개 · PASS로 간주하지 않음</p></div></details> : null}
+{search.metadata ? <details className="rounded-xl border border-slate-200 bg-white px-3 py-2 text-xs text-slate-700"><summary className="cursor-pointer font-bold text-slate-900">계산 재현 정보</summary><div className="mt-2 grid gap-1 sm:grid-cols-2"><span>엔진 버전: <b>{search.metadata.engineVersion}</b></span><span>앱 버전: <b>{search.metadata.appVersion}</b></span><span>계산 시각: <b>{search.metadata.calculatedAt}</b></span><span>이번 계산: <b>{search.metadata.status === "completed" ? "완료" : search.metadata.status}</b></span><span>기준 예시: <b>{search.metadata.baselineVersion}</b></span><span>GSRM 기준: <b>{search.metadata.gsrmReferenceVersion}</b></span><span>AN 카탈로그: <b>{search.metadata.anCatalogItemCount}개 · {search.metadata.anCatalogVersion}</b></span><span>탐색 모드: <b>{search.metadata.searchMode}</b></span></div></details> : null}
+{search ? <details className="rounded-xl border border-violet-200 bg-violet-50 px-3 py-2 text-xs text-violet-950"><summary className="cursor-pointer font-bold">설계 검토 리포트</summary><div className="mt-2 space-y-1 leading-5"><p><b>이번 계산:</b> {lastCalculationStatus === "completed" ? "완료" : lastCalculationStatus === "cancelled" ? "취소" : lastCalculationStatus === "failed" ? "실패" : "확인 필요"}</p><p><b>배포 전 기준 검산:</b> 통과</p><p><b>현재 결과에 대한 별도 fixture 재검산:</b> 실행하지 않음</p><p>이 화면과 내보내기에는 입력 조건, 탐색 범위, 후보 판정, GSRM·AN 요약과 검산 대상 fixture 목록이 함께 기록됩니다.</p><p>자동 탐색은 전역 최적해를 보장하지 않으며, 결과는 실제 제작·점화 승인용이 아닌 교육·설계 검토용입니다.</p><p>검산 fixture: {VALIDATION_FIXTURES.length}개 · 현재 결과를 PASS로 간주하지 않음</p></div></details> : null}
 {targetThrustText.trim() === "" ? <p className="rounded-xl border border-slate-200 bg-slate-50 px-3 py-2 text-xs font-semibold text-slate-700">추력 목표가 비어 있어 MSE·최대 편차·추력 변동성·추력 점수는 계산하지 않습니다.</p> : null}
 {restoredFromStorage && !search ? <div className="rounded-2xl border border-sky-200 bg-sky-50 px-4 py-3 text-xs text-sky-900" role="status">저장된 입력값을 복원했습니다. 마지막 계산 결과는 현재 화면에 없으므로 다시 계산해 주세요.</div> : null}
 {search && calculatedSignature !== inputSignature ? <div className="rounded-2xl border-2 border-amber-300 bg-amber-50 px-4 py-3 text-xs text-amber-950" role="alert"><strong>재계산 필요</strong> · 입력값이 마지막 계산 결과와 달라졌습니다.</div> : null}
@@ -647,6 +730,7 @@ const requestCancel = () => { cancelRequested.current = true; searchWorker.curre
 <p className="mt-1 text-slate-500">질량 오차와 압력 제한을 기본으로 평가하고, 목표 추력 입력 시 추력 곡선 오차를 추가합니다.</p>
 </div>
 <div className="rounded-2xl border border-cyan-100 bg-cyan-50/50 px-4 py-3"><div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between"><div><p className="font-bold text-slate-900">후보 필터·비교·내보내기</p><p className="mt-1 text-[11px] text-slate-600">상태 필터를 선택하고 후보 행의 비교 버튼으로 최대 3개까지 비교하세요.</p></div><div className="flex flex-wrap gap-2" role="group" aria-label="후보 상태 필터">{([['pass','추천'],['conditional','조건부'],['fail','탈락']] as const).map(([value,label]) => <label key={value} className="flex items-center gap-1 rounded-lg bg-white px-2 py-1.5 text-xs"><input type="checkbox" checked={statusFilters.includes(value)} onChange={() => setStatusFilters((current) => current.includes(value) ? current.filter((item) => item !== value) : [...current, value])} />{label}</label>)}</div><div className="flex gap-2"><button type="button" onClick={() => downloadExport("csv")} className="rounded-lg border border-cyan-300 bg-white px-3 py-1.5 text-xs font-bold text-cyan-800 focus:outline-none focus:ring-2 focus:ring-cyan-500">CSV 내보내기</button><button type="button" onClick={() => downloadExport("json")} className="rounded-lg bg-cyan-700 px-3 py-1.5 text-xs font-bold text-white focus:outline-none focus:ring-2 focus:ring-cyan-500">JSON 내보내기</button></div></div><p className="mt-2 text-[11px] text-slate-600">현재 표시 후보 {visibleCandidates.length.toLocaleString()}개 · 비교 {comparison.length}/3</p></div>
+<div className="rounded-2xl border border-violet-200 bg-violet-50/50 px-4 py-3"><div className="flex flex-wrap items-center justify-between gap-2"><div><p className="font-bold text-slate-900">계산 결과 이력</p><p className="mt-1 text-[11px] text-slate-600">서버로 전송하지 않고 이 브라우저에 최대 {MAX_SAVED_RESULTS}개까지 저장합니다.</p></div><div className="flex gap-2"><input aria-label="저장 결과 이름" value={saveName} onChange={(event) => setSaveName(event.target.value)} placeholder="저장 이름(선택)" className="w-40 rounded-lg border border-violet-200 bg-white px-2 py-1.5 text-xs" /><button type="button" onClick={saveCurrentResult} className="rounded-lg bg-violet-700 px-3 py-1.5 text-xs font-bold text-white">현재 결과 저장</button></div></div>{historyNotice ? <p className="mt-2 rounded-lg bg-white px-2 py-1.5 text-[11px] text-violet-900" role="status">{historyNotice}</p> : null}{savedResults.length ? <div className="mt-3 space-y-2">{savedResults.map((item) => { const versionMismatch = item.payload.metadata?.engineVersion !== CALCULATION_ENGINE_VERSION || item.payload.metadata?.appVersion !== APP_VERSION || item.payload.metadata?.baselineVersion !== BASELINE_VERSION || item.payload.metadata?.gsrmReferenceVersion !== GSRM_REFERENCE_VERSION || item.payload.metadata?.anCatalogVersion !== AN_CATALOG_VERSION; return <div key={item.id} className="flex flex-wrap items-center justify-between gap-2 rounded-xl border border-violet-100 bg-white px-3 py-2 text-xs"><div><p className="font-bold text-slate-900">{item.name}</p><p className="text-[11px] text-slate-500">{new Date(item.savedAt).toLocaleString("ko-KR")} · 후보 {item.payload.search?.totalCombinations?.toLocaleString?.() ?? "-"}개 {versionMismatch ? "· 버전 불일치" : ""}</p></div><div className="flex flex-wrap gap-1.5"><button type="button" onClick={() => loadSavedResult(item)} className="rounded-md border border-violet-200 px-2 py-1 font-semibold text-violet-800">불러오기</button><button type="button" onClick={() => downloadExport("json", item.payload)} className="rounded-md border border-slate-200 px-2 py-1">JSON</button><button type="button" onClick={() => downloadExport("csv", item.payload)} className="rounded-md border border-slate-200 px-2 py-1">CSV</button><button type="button" onClick={() => renameSavedResult(item.id)} className="rounded-md border border-slate-200 px-2 py-1">이름 변경</button><button type="button" onClick={() => deleteSavedResult(item.id)} className="rounded-md border border-rose-200 px-2 py-1 text-rose-700">삭제</button></div></div>})}</div> : <p className="mt-3 text-[11px] text-slate-500">저장된 계산 결과가 없습니다.</p>}<div className="mt-3 flex flex-wrap items-center gap-2"><span className="text-[11px] font-semibold text-slate-600">저장 결과 비교</span><select aria-label="비교 결과 1" value={comparisonResultIds[0]} onChange={(event) => setComparisonResultIds(([_, second]) => [event.target.value, second])} className="rounded-lg border border-violet-200 bg-white px-2 py-1.5 text-xs"><option value="">첫 결과 선택</option>{savedResults.map((item) => <option key={item.id} value={item.id}>{item.name}</option>)}</select><select aria-label="비교 결과 2" value={comparisonResultIds[1]} onChange={(event) => setComparisonResultIds(([first]) => [first, event.target.value])} className="rounded-lg border border-violet-200 bg-white px-2 py-1.5 text-xs"><option value="">둘째 결과 선택</option>{savedResults.map((item) => <option key={item.id} value={item.id}>{item.name}</option>)}</select></div>{comparisonResultIds[0] && comparisonResultIds[1] ? <SavedComparison first={savedResults.find((item) => item.id === comparisonResultIds[0])!} second={savedResults.find((item) => item.id === comparisonResultIds[1])!} /> : null}</div>
 {comparison.length > 0 ? <div className="rounded-2xl border border-cyan-200 bg-white p-3"><p className="text-xs font-bold text-slate-900">선택 후보 비교 ({comparison.length}/3)</p><div className="mt-2 grid gap-2 sm:grid-cols-3">{comparison.map((candidate) => <div key={`${candidate.input.grainOuterDiameterMm}-${candidate.input.grainCoreDiameterMm}-${candidate.input.segmentLengthMm}-${candidate.input.segmentCount}`} className="rounded-xl border border-slate-200 p-3 text-[11px]"><div className="flex items-center justify-between gap-2"><strong>{candidate.input.grainOuterDiameterMm}×{candidate.input.grainCoreDiameterMm}×{candidate.input.segmentLengthMm}/{candidate.input.segmentCount}</strong><StatusPill status={candidate.status} /></div><p className="mt-2">질량 {formatNumber(candidate.grainMassKg,4)} kg</p><p>압력 {formatNumber(candidate.maximumPressureMpa,4)} MPa</p><p>연소 {formatNumber(candidate.burnTimeSec,4)} s</p><p>추력 {formatNumber(candidate.averageThrustN,2)} N</p><p className="mt-1 text-slate-500">{candidate.reasons.join(" ") || "조건 충족"}</p></div>)}</div></div> : null}
 <div className="overflow-hidden rounded-3xl border border-slate-200 bg-white shadow-sm">
 <div className="hidden overflow-x-auto sm:block">

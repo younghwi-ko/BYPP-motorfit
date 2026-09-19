@@ -91,9 +91,16 @@ test("AN 241개, 검색, 필터, 3개 비교, 내보내기", async ({ page }) =>
   expect(payload.an.catalogSize).toBe(241); expect(payload.an.query).toBeDefined(); expect(payload.an.page).toBeDefined(); expect(payload.referenceRule).toContain("추천·조건부"); expect((await readFile(csvPath!, "utf8")).length).toBeGreaterThan(100);
   expect(payload.input.fuelMassToleranceDisplay).toBe("0.010 kg"); expect(payload.search.counts.referenceRejected).toBe(0); expect(payload.representativeCandidate).toBeDefined();
   expect(payload.metadata.engineVersion).toBe("candidate-search-1"); expect(payload.metadata.status).toBe("completed"); expect(payload.metadata.anCatalogItemCount).toBe(241); expect(payload.metadata.calculatedAt).toBeTruthy();
-  expect(payload.validation.status).toBe("NOT_RUN"); expect(payload.validation.summary).toContain("검산하지 않음"); expect(payload.validation.fixtures.length).toBeGreaterThan(0);
+  expect(payload.validation.status).toBe("NOT_RUN"); expect(payload.validation.summary).toContain("실행하지 않음"); expect(payload.validation.baselineStatus).toBe("PASS"); expect(payload.validation.fixtures.length).toBeGreaterThan(0);
   expect(csv).toContain("validation");
   await expect(page.getByText("설계 검토 리포트")).toBeVisible();
+  await page.getByLabel("저장 결과 이름").fill("배포 회귀 결과 A"); await page.getByRole("button", { name: "현재 결과 저장" }).click();
+  await expect(page.getByText("“배포 회귀 결과 A” 결과를 저장했습니다.")).toBeVisible();
+  const history = await page.evaluate(() => JSON.parse(localStorage.getItem("motorfit-calculation-history-v1") ?? "[]"));
+  expect(history).toHaveLength(1); expect(history[0].payload.validation.status).toBe("NOT_RUN");
+  await page.getByLabel("저장 결과 이름").fill("배포 회귀 결과 B"); await page.getByRole("button", { name: "현재 결과 저장" }).click();
+  await page.getByLabel("비교 결과 1").selectOption({ label: "배포 회귀 결과 A" }); await page.getByLabel("비교 결과 2").selectOption({ label: "배포 회귀 결과 B" });
+  await expect(page.getByText(/저장 결과 비교 · 차이만 강조/)).toBeVisible();
 });
 
 test("초보자 사용 설명서와 메인 화면 이동", async ({ page }) => {
@@ -206,4 +213,14 @@ test("동일 입력은 동일한 대표 후보를 유지하고 모바일 요약�
   const secondCounts = await page.getByText(/전체\s+[\d,]+개 · 정밀 계산/).first().innerText();
   expect(second).toBe(first);
   expect(secondCounts).toBe(firstCounts);
+});
+
+test("저장 이력 손상 복구", async ({ page }) => {
+  await page.addInitScript(() => {
+    localStorage.setItem("motorfit-calculation-history-v1", "{broken-json");
+  });
+  await page.goto("/");
+  await page.getByRole("button", { name: "최종 추천 계산" }).click();
+  await expect(page.getByText(/저장된 결과 데이터가 손상되어 무시했습니다/)).toBeVisible({ timeout: 120000 });
+  expect(await page.evaluate(() => localStorage.getItem("motorfit-calculation-history-v1"))).toBe("[]");
 });
