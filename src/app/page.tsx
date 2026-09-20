@@ -12,7 +12,7 @@ import type {
   CandidateSearchResult,
 } from "../engine";
 import { DEMO_INPUT } from "./demo-config";
-import { EXTERNAL_VALIDATION_SCHEMA_VERSION, EXTERNAL_VALIDATION_STORAGE_KEY, VALIDATION_METRICS, compareValidationRecord, parseExternalValidationBackup } from "../engine/external-validation";
+import { EXTERNAL_VALIDATION_SCHEMA_VERSION, EXTERNAL_VALIDATION_STORAGE_KEY, VALIDATION_METRICS, compareValidationRecord, getValidationQualityWarnings, parseExternalValidationBackup } from "../engine/external-validation";
 import type { ExternalValidationRecord, ValidationMetric } from "../engine/external-validation";
 
 const DEFAULT_FUEL_MASS_TOLERANCE_KG = 0.010;
@@ -59,6 +59,17 @@ const formatNumber = (value: number, digits = 3) =>
   value.toLocaleString("ko-KR", { maximumFractionDigits: digits });
 
 const formatMassTolerance = (value: number) => `${value.toFixed(3)} kg`;
+
+const VALIDATION_WARNING_LABELS = {
+  "unit-missing": "단위 누락",
+  "conditions-missing": "측정 조건 누락",
+  "data-version-missing": "데이터 버전 누락",
+  "source-missing": "출처 누락",
+  "duplicate-possible": "동일 이름·시각 중복 가능성",
+  "version-mismatch": "계산 결과와 데이터 버전 불일치",
+  "measurement-missing": "측정값 없는 항목 있음",
+  "tolerance-missing": "허용 오차 없는 항목 있음",
+} as const;
 
 function migrateStoredConfig(config: CandidateSearchConfig): CandidateSearchConfig {
   return config.fuelMassToleranceKg === 0.005
@@ -276,7 +287,8 @@ function printReviewReport(payload: Record<string, any> | null, status: string, 
   const predicted = predictedMetricsForReport(candidate);
   const externalHtml = externalRecords.length ? externalRecords.map((record) => {
     const comparisons = compareValidationRecord(record, predicted);
-    return `<div class="row"><div class="label">외부 검증 · ${escapeHtml(record.name)}</div><div class="value">${escapeHtml(record.sourceDescription)}<br>${comparisons.map((item) => `${escapeHtml(item.metric)}: 예측 ${escapeHtml(item.predicted ?? "비교 불가")} · 측정 ${escapeHtml(item.measured ?? "비교 불가")} · 차이 ${escapeHtml(item.absoluteDifference ?? "비교 불가")} · ${escapeHtml(item.status)}`).join("<br>")}</div></div>`;
+    const warnings = getValidationQualityWarnings(record, { appVersion: APP_VERSION, engineVersion: CALCULATION_ENGINE_VERSION, baselineVersion: BASELINE_VERSION, gsrmReferenceVersion: GSRM_REFERENCE_VERSION, anCatalogVersion: AN_CATALOG_VERSION }, externalRecords);
+    return `<div class="row"><div class="label">외부 검증 · ${escapeHtml(record.name)}</div><div class="value">${escapeHtml(record.sourceDescription)}<br>${comparisons.map((item) => `${escapeHtml(item.metric)}: 예측 ${escapeHtml(item.predicted ?? "비교 불가")} · 측정 ${escapeHtml(item.measured ?? "비교 불가")} · 차이 ${escapeHtml(item.absoluteDifference ?? "비교 불가")} · ${escapeHtml(item.status)}`).join("<br>")}${warnings.length ? `<br>품질 경고: ${escapeHtml(warnings.map((warning) => VALIDATION_WARNING_LABELS[warning]).join(" · "))}` : ""}</div></div>`;
   }).join("") : `<p class="small">연결된 외부 검증 데이터가 없습니다.</p>`;
   rows.push(["모델 검증 수준", payload?.modelValidationLevel ?? MODEL_VALIDATION_LEVEL], ["기준 모델 재현", payload?.baselineReproductionStatus ?? BASELINE_REPRODUCTION_STATUS], ["계산 재현성", payload?.deterministicCalculationStatus ?? DETERMINISTIC_CALCULATION_STATUS], ["하드웨어 시험 검증", payload?.hardwareValidationStatus ?? HARDWARE_VALIDATION_STATUS], ["제작 승인", payload?.productionApprovalStatus ?? PRODUCTION_APPROVAL_STATUS], ["시험 데이터 등록", payload?.validationDataAvailable ? "있음" : "없음"], ["모델 가정", (payload?.assumptions ?? MODEL_ASSUMPTIONS).join(" / ")], ["모델 한계", (payload?.limitations ?? MODEL_LIMITATIONS).join(" / ")]);
   const reasons = candidate?.reasons ?? [];
@@ -416,6 +428,7 @@ export default function Home() {
   const [validationCalculationId, setValidationCalculationId] = useState("current");
   const [validationMeasured, setValidationMeasured] = useState<Record<ValidationMetric, string>>(EMPTY_VALIDATION_FORM);
   const [validationTolerances, setValidationTolerances] = useState<Record<ValidationMetric, string>>(EMPTY_VALIDATION_FORM);
+  const [editingValidationId, setEditingValidationId] = useState<string | null>(null);
   const validationBackupInput = useRef<HTMLInputElement | null>(null);
   const backupFileInput = useRef<HTMLInputElement | null>(null);
 const cancelRequested = useRef(false);
@@ -590,7 +603,18 @@ const requestCancel = () => { cancelRequested.current = true; searchWorker.curre
   const toggleComparison = (candidate: CandidateResult) => setComparison((current) => current.some((item) => item === candidate) ? current.filter((item) => item !== candidate) : current.length >= 3 ? current : [...current, candidate]);
   const gsrmReferenceDiameterMm = selected ? calculateGsrmReferenceDiameter(selected.input.chamberDiameterMm, gsrmWallThicknessMm) : null;
   const predictedMetricsFromPayload = (payload: Record<string, unknown> | null | undefined): Partial<Record<ValidationMetric, number>> => predictedMetricsForReport(payload?.representativeCandidate);
-  const resetValidationForm = () => { setValidationName(""); setValidationSource(""); setValidationDataVersion(""); setValidationConditions(""); setValidationCalculationId("current"); setValidationMeasured({ ...EMPTY_VALIDATION_FORM }); setValidationTolerances({ ...EMPTY_VALIDATION_FORM }); };
+  const resetValidationForm = () => { setEditingValidationId(null); setValidationName(""); setValidationSource(""); setValidationDataVersion(""); setValidationConditions(""); setValidationCalculationId("current"); setValidationMeasured({ ...EMPTY_VALIDATION_FORM }); setValidationTolerances({ ...EMPTY_VALIDATION_FORM }); };
+  const editExternalValidation = (record: ExternalValidationRecord) => {
+    setEditingValidationId(record.id);
+    setValidationName(record.name);
+    setValidationSource(record.sourceDescription === "출처 미기록" ? "" : record.sourceDescription);
+    setValidationDataVersion(record.dataVersion === "식별자 미기록" ? "" : record.dataVersion);
+    setValidationConditions(record.conditionsMemo);
+    setValidationCalculationId(record.calculationResultId);
+    setValidationMeasured(Object.fromEntries(VALIDATION_METRICS.map(({ key }) => [key, record.measured[key] == null ? "" : String(record.measured[key])])) as Record<ValidationMetric, string>);
+    setValidationTolerances(Object.fromEntries(VALIDATION_METRICS.map(({ key }) => [key, record.tolerances[key] == null ? "" : String(record.tolerances[key])])) as Record<ValidationMetric, string>);
+    setValidationNotice(`“${record.name}” 기록을 수정 중입니다.`);
+  };
   const saveExternalValidation = () => {
     if (!search) { setValidationNotice("먼저 계산을 완료한 뒤 외부 검증 데이터를 기록하세요."); return; }
     const measured: Partial<Record<ValidationMetric, number>> = {};
@@ -602,9 +626,10 @@ const requestCancel = () => { cancelRequested.current = true; searchWorker.curre
       if (rawTolerance) { const value = Number(rawTolerance); if (!Number.isFinite(value) || value < 0) { setValidationNotice(`${key} 허용 오차는 0 이상 숫자여야 합니다.`); return; } tolerances[key] = value; }
     }
     if (!Object.keys(measured).length) { setValidationNotice("최소 한 개의 측정값을 입력하세요."); return; }
-    const record: ExternalValidationRecord = { id: createSavedCalculationId(), name: validationName.trim() || `외부 검증 ${new Date().toLocaleString("ko-KR")}`, recordedAt: createSavedCalculationTimestamp(), sourceDescription: validationSource.trim() || "출처 미기록", calculationResultId: validationCalculationId, measured, tolerances, conditionsMemo: validationConditions.trim(), dataVersion: validationDataVersion.trim() || "식별자 미기록", units: VALIDATION_UNITS, appVersion: APP_VERSION, engineVersion: CALCULATION_ENGINE_VERSION, baselineVersion: BASELINE_VERSION, gsrmReferenceVersion: GSRM_REFERENCE_VERSION, anCatalogVersion: AN_CATALOG_VERSION };
-    setExternalValidationRecords((current) => [record, ...current].slice(0, 20));
-    setValidationNotice(`외부 검증 데이터 “${record.name}”을 저장했습니다. 계산 판정에는 영향을 주지 않습니다.`);
+    const existing = editingValidationId ? externalValidationRecords.find((item) => item.id === editingValidationId) : null;
+    const record: ExternalValidationRecord = { id: existing?.id ?? createSavedCalculationId(), name: validationName.trim() || `외부 검증 ${new Date().toLocaleString("ko-KR")}`, recordedAt: existing?.recordedAt ?? createSavedCalculationTimestamp(), sourceDescription: validationSource.trim() || "출처 미기록", calculationResultId: validationCalculationId, measured, tolerances, conditionsMemo: validationConditions.trim(), dataVersion: validationDataVersion.trim() || "식별자 미기록", units: VALIDATION_UNITS, appVersion: existing?.appVersion ?? APP_VERSION, engineVersion: existing?.engineVersion ?? CALCULATION_ENGINE_VERSION, baselineVersion: existing?.baselineVersion ?? BASELINE_VERSION, gsrmReferenceVersion: existing?.gsrmReferenceVersion ?? GSRM_REFERENCE_VERSION, anCatalogVersion: existing?.anCatalogVersion ?? AN_CATALOG_VERSION };
+    setExternalValidationRecords((current) => editingValidationId ? current.map((item) => item.id === editingValidationId ? record : item) : [record, ...current].slice(0, 20));
+    setValidationNotice(`외부 검증 데이터 “${record.name}”을 ${editingValidationId ? "수정" : "저장"}했습니다. 계산 판정에는 영향을 주지 않습니다.`);
     resetValidationForm();
   };
   const exportExternalValidationBackup = () => {
@@ -627,12 +652,16 @@ const requestCancel = () => { cancelRequested.current = true; searchWorker.curre
   const validationTargetPayload = validationCalculationId === "current" ? (hasCurrentValidation ? buildExportPayload() : null) : savedResults.find((item) => item.id === validationCalculationId)?.payload ?? null;
   const validationTargetRecords = externalValidationRecords.filter((record) => record.calculationResultId === validationCalculationId);
   const activeValidationComparisons = validationTargetRecords.map((record) => ({ record, comparisons: compareValidationRecord(record, predictedMetricsFromPayload(validationTargetPayload)) }));
+  const currentValidationVersions = { appVersion: APP_VERSION, engineVersion: CALCULATION_ENGINE_VERSION, baselineVersion: BASELINE_VERSION, gsrmReferenceVersion: GSRM_REFERENCE_VERSION, anCatalogVersion: AN_CATALOG_VERSION };
+  const activeValidationWarnings = validationTargetRecords.map((record) => ({ record, warnings: getValidationQualityWarnings(record, currentValidationVersions, externalValidationRecords) }));
+  const cumulativeValidationComparisons = VALIDATION_METRICS.map(({ key, label, unit }) => ({ key, label, unit, predicted: predictedMetricsFromPayload(validationTargetPayload)[key], values: activeValidationComparisons.map(({ record, comparisons }) => ({ record, comparison: comparisons.find((item) => item.metric === key)! })) }));
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const downloadExport = (format: "csv" | "json", savedPayload?: Record<string, any>) => {
     const payload = savedPayload ?? buildExportPayload();
     if (!payload) return;
     const rows = payload.candidates ?? [];
     const externalValidationComparisons = (payload.externalValidation ?? []).flatMap((record: ExternalValidationRecord) => compareValidationRecord(record, predictedMetricsForReport(payload.representativeCandidate)));
+    const externalValidationQualityWarnings = (payload.externalValidation ?? []).map((record: ExternalValidationRecord) => ({ id: record.id, warnings: getValidationQualityWarnings(record, currentValidationVersions, payload.externalValidation as ExternalValidationRecord[]) }));
     const csvValue = (value: unknown) => JSON.stringify(value ?? "");
     const csvLines = [
       "# MotorFit export",
@@ -650,6 +679,7 @@ const requestCancel = () => { cancelRequested.current = true; searchWorker.curre
       `validation,${csvValue(payload.validation)}`,
       `externalValidation,${csvValue(payload.externalValidation ?? [])}`,
       `externalValidationComparisons,${csvValue(externalValidationComparisons)}`,
+      `externalValidationQualityWarnings,${csvValue(externalValidationQualityWarnings)}`,
       `referenceCandidate,${csvValue(payload.referenceCandidate)}`,
       `gsrm,${csvValue(payload.gsrm)}`,
       `an,${csvValue(payload.an)}`,
@@ -657,7 +687,7 @@ const requestCancel = () => { cancelRequested.current = true; searchWorker.curre
       "status,geometry,massKg,maximumPressureMpa,burnTimeSec,averageThrustN,totalImpulseNs,reasons",
       ...rows.map((row: { status: string; geometry: string; massKg: number; maximumPressureMpa: number; burnTimeSec: number; averageThrustN: number; totalImpulseNs: number; reasons: string }) => [row.status, row.geometry, row.massKg, row.maximumPressureMpa, row.burnTimeSec, row.averageThrustN, row.totalImpulseNs, csvValue(row.reasons)].join(",")),
     ];
-    const text = format === "json" ? JSON.stringify({ ...payload, externalValidationComparisons }, null, 2) : csvLines.join("\n");
+    const text = format === "json" ? JSON.stringify({ ...payload, externalValidationComparisons, externalValidationQualityWarnings }, null, 2) : csvLines.join("\n");
     const blob = new Blob([text], { type: format === "json" ? "application/json" : "text/csv;charset=utf-8" });
     const url = URL.createObjectURL(blob); const anchor = document.createElement("a"); anchor.href = url; anchor.download = `motorfit-results.${format}`; anchor.click(); URL.revokeObjectURL(url);
   };
@@ -888,7 +918,9 @@ const requestCancel = () => { cancelRequested.current = true; searchWorker.curre
 {search.metadata ? <details className="rounded-xl border border-slate-200 bg-white px-3 py-2 text-xs text-slate-700"><summary className="cursor-pointer font-bold text-slate-900">계산 재현 정보</summary><div className="mt-2 grid gap-1 sm:grid-cols-2"><span>엔진 버전: <b>{search.metadata.engineVersion}</b></span><span>앱 버전: <b>{search.metadata.appVersion}</b></span><span>계산 시각: <b>{search.metadata.calculatedAt}</b></span><span>이번 계산: <b>{search.metadata.status === "completed" ? "완료" : search.metadata.status}</b></span><span>기준 예시: <b>{search.metadata.baselineVersion}</b></span><span>GSRM 기준: <b>{search.metadata.gsrmReferenceVersion}</b></span><span>AN 카탈로그: <b>{search.metadata.anCatalogItemCount}개 · {search.metadata.anCatalogVersion}</b></span><span>탐색 모드: <b>{search.metadata.searchMode}</b></span></div></details> : null}
 {search ? <details className="rounded-xl border border-violet-200 bg-violet-50 px-3 py-2 text-xs text-violet-950"><summary className="cursor-pointer font-bold">설계 검토 리포트</summary><div className="mt-2 space-y-1 leading-5"><p><b>이번 계산:</b> {lastCalculationStatus === "completed" ? "완료" : lastCalculationStatus === "cancelled" ? "취소" : lastCalculationStatus === "failed" ? "실패" : "확인 필요"}</p><p><b>배포 전 기준 검산:</b> 통과</p><p><b>현재 결과에 대한 별도 fixture 재검산:</b> 실행하지 않음</p><p>이 화면과 내보내기에는 입력 조건, 탐색 범위, 후보 판정, GSRM·AN 요약과 검산 대상 fixture 목록이 함께 기록됩니다.</p><p>자동 탐색은 전역 최적해를 보장하지 않으며, 결과는 실제 제작·점화 승인용이 아닌 교육·설계 검토용입니다.</p><p>검산 fixture: {VALIDATION_FIXTURES.length}개 · 현재 결과를 PASS로 간주하지 않음</p></div></details> : null}
 {targetThrustText.trim() === "" ? <p className="rounded-xl border border-slate-200 bg-slate-50 px-3 py-2 text-xs font-semibold text-slate-700">추력 목표가 비어 있어 MSE·최대 편차·추력 변동성·추력 점수는 계산하지 않습니다.</p> : null}
+{activeValidationComparisons.length ? <div className="mb-3 rounded-2xl border border-amber-200 bg-amber-50/50 px-4 py-3 text-xs text-amber-950"><p className="font-bold">누적 비교 요약 · 연결 기록 {activeValidationComparisons.length}개</p><p className="mt-1">{activeValidationComparisons.length === 1 ? "현재 표본은 1개입니다." : `현재 표본은 ${activeValidationComparisons.length}개이며, 기록 수가 모델의 일반적 신뢰성·안전성·제작 가능성을 자동으로 판정하지 않습니다.`}</p><div className="mt-2 overflow-x-auto"><table className="min-w-[680px] w-full text-left text-[11px]"><thead><tr className="border-b border-amber-200"><th className="px-2 py-1.5">항목</th><th className="px-2 py-1.5">예측값</th>{activeValidationComparisons.map(({ record }) => <th key={record.id} className="px-2 py-1.5">{record.name}</th>)}</tr></thead><tbody>{cumulativeValidationComparisons.map((row) => <tr key={row.key} className="border-b border-amber-100"><td className="px-2 py-1.5 font-semibold">{row.label} ({row.unit})</td><td className="px-2 py-1.5">{row.predicted == null ? "비교 불가" : formatNumber(row.predicted, 4)}</td>{row.values.map(({ record, comparison: item }) => <td key={record.id} className="px-2 py-1.5">{item.measured == null ? "비교 불가" : `${formatNumber(item.measured, 4)} · ${item.status === "within" ? "범위 내" : item.status === "outside" ? "범위 밖" : item.status === "tolerance-unset" ? "허용 오차 미입력" : "비교 불가"}`}<br /><span className="text-slate-600">차이 {item.absoluteDifference == null ? "비교 불가" : formatNumber(item.absoluteDifference, 4)}</span></td>)}</tr>)}</tbody></table></div>{activeValidationWarnings.map(({ record, warnings }) => warnings.length ? <p key={record.id} className="mt-2 rounded-lg border border-amber-300 bg-white px-2 py-1.5">{record.name} 품질 경고: {warnings.map((warning) => VALIDATION_WARNING_LABELS[warning]).join(" · ")}</p> : null)}<p className="mt-2">누적 비교는 모델과 측정 결과의 차이를 기록하는 기능이며, 측정 데이터의 품질과 출처는 사용자가 확인해야 합니다.</p></div> : null}
 {restoredFromStorage && !search ? <div className="rounded-2xl border border-sky-200 bg-sky-50 px-4 py-3 text-xs text-sky-900" role="status">저장된 입력값을 복원했습니다. 마지막 계산 결과는 현재 화면에 없으므로 다시 계산해 주세요.</div> : null}
+{validationTargetRecords.length ? <div className="mb-3 rounded-xl border border-amber-200 bg-white px-3 py-2 text-xs"><label className="font-semibold text-slate-700">검증 데이터 수정 대상<select aria-label="검증 데이터 수정 대상" className="ml-2 rounded-md border border-slate-200 px-2 py-1" value={editingValidationId ?? ""} onChange={(event) => { const record = validationTargetRecords.find((item) => item.id === event.target.value); if (record) editExternalValidation(record); }}><option value="">선택</option>{validationTargetRecords.map((record) => <option key={record.id} value={record.id}>{record.name}</option>)}</select></label>{editingValidationId ? <><span className="ml-2 text-amber-800">수정 중 · 저장 버튼으로 반영합니다.</span><button type="button" onClick={resetValidationForm} className="ml-2 rounded-md border border-slate-300 px-2 py-1 text-slate-700">수정 취소</button></> : null}</div> : null}
 {search && calculatedSignature !== inputSignature ? <div className="rounded-2xl border-2 border-amber-300 bg-amber-50 px-4 py-3 text-xs text-amber-950" role="alert"><strong>재계산 필요</strong> · 입력값이 마지막 계산 결과와 달라졌습니다.</div> : null}
 <details className="mb-3 rounded-2xl border border-slate-300 bg-slate-50 px-4 py-3 text-xs text-slate-700"><summary className="cursor-pointer font-bold text-slate-900">모델 가정과 한계</summary><div className="mt-2 space-y-2 leading-5"><p><b>검증 수준:</b> 기준 모델 재현 {BASELINE_REPRODUCTION_STATUS} · 계산 재현성 {DETERMINISTIC_CALCULATION_STATUS} · 하드웨어 시험 검증 {HARDWARE_VALIDATION_STATUS} · 제작 승인 {PRODUCTION_APPROVAL_STATUS}</p><p><b>엔진·데이터:</b> {CALCULATION_ENGINE_VERSION} · {BASELINE_VERSION} · {GSRM_REFERENCE_VERSION} · {AN_CATALOG_VERSION}</p><ul className="list-disc pl-5">{MODEL_ASSUMPTIONS.map((item) => <li key={item}>{item}</li>)}</ul><ul className="list-disc pl-5">{MODEL_LIMITATIONS.map((item) => <li key={item}>{item}</li>)}</ul><p className="font-semibold text-amber-800">실제 제작·점화 승인용이 아니며, 실제 시험 데이터가 등록되지 않았습니다.</p></div></details>
 <div className="flex flex-col gap-3 rounded-2xl border border-slate-200 bg-white px-5 py-4 shadow-sm sm:flex-row sm:items-center sm:justify-between">

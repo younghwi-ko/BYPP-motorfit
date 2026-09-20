@@ -115,14 +115,27 @@ test("외부 검증 데이터 저장·비교·백업", async ({ page }) => {
   await page.getByLabel("측정값 평균 추력").fill("200");
   await page.getByLabel("허용 오차 평균 추력").fill("1000");
   await page.getByRole("button", { name: "검증 데이터 저장" }).click();
-  await expect(page.getByText("시험 기록 A", { exact: true })).toBeVisible();
-  await expect(page.getByText("범위 내")).toBeVisible();
+  await expect(page.locator("p.font-bold", { hasText: "시험 기록 A" }).first()).toBeVisible();
+  await expect(page.getByText("범위 내", { exact: true }).last()).toBeVisible();
+  await page.getByLabel("검증 데이터 이름").fill("시험 기록 B");
+  await page.getByLabel("측정값 평균 추력").fill("201");
+  await page.getByLabel("허용 오차 평균 추력").fill("1000");
+  await page.getByRole("button", { name: "검증 데이터 저장" }).click();
+  await expect(page.getByText("연결 기록 2개", { exact: false })).toBeVisible();
+  await page.getByLabel("검증 데이터 수정 대상").selectOption({ label: "시험 기록 B" });
+  await page.getByLabel("검증 데이터 이름").fill("시험 기록 B 수정");
+  await page.getByRole("button", { name: "검증 데이터 저장" }).click();
+  await expect(page.locator("p.font-bold", { hasText: "시험 기록 B 수정" }).first()).toBeVisible();
   const download = page.waitForEvent("download"); await page.getByRole("button", { name: "검증 데이터 JSON 백업" }).click();
   const event = await download; expect(event.suggestedFilename()).toBe("motorfit-external-validation-backup.json");
   const path = await event.path(); expect(path).toBeTruthy();
   const { readFile } = await import("node:fs/promises"); const backup = JSON.parse(await readFile(path!, "utf8"));
-  expect(backup.schemaVersion).toBe(1); expect(backup.records).toHaveLength(1); expect(JSON.stringify(backup)).not.toMatch(/password|api[_-]?key|secret|token|process\.env/i);
-  await page.getByRole("button", { name: "삭제", exact: true }).click(); await expect(page.getByText("선택한 계산 결과에 연결된 외부 검증 데이터가 없습니다.")).toBeVisible();
+  expect(backup.schemaVersion).toBe(1); expect(backup.records).toHaveLength(2); expect(JSON.stringify(backup)).not.toMatch(/password|api[_-]?key|secret|token|process\.env/i);
+  await page.getByRole("button", { name: "삭제", exact: true }).first().click();
+  await page.getByRole("button", { name: "삭제", exact: true }).first().click();
+  await expect(page.getByText("선택한 계산 결과에 연결된 외부 검증 데이터가 없습니다.")).toBeVisible();
+  await page.getByLabel("검증 데이터 백업 파일 선택").setInputFiles(path!);
+  await expect(page.locator("p.font-bold", { hasText: "시험 기록 A" }).first()).toBeVisible();
 });
 
 test("초보자 사용 설명서와 메인 화면 이동", async ({ page }) => {

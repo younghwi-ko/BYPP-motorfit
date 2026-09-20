@@ -40,6 +40,24 @@ export interface ValidationComparison {
   status: "within" | "outside" | "unavailable" | "tolerance-unset";
 }
 
+export type ExternalValidationQualityWarning =
+  | "unit-missing"
+  | "conditions-missing"
+  | "data-version-missing"
+  | "source-missing"
+  | "duplicate-possible"
+  | "version-mismatch"
+  | "measurement-missing"
+  | "tolerance-missing";
+
+export interface ExternalValidationVersions {
+  appVersion: string;
+  engineVersion: string;
+  baselineVersion: string;
+  gsrmReferenceVersion: string;
+  anCatalogVersion: string;
+}
+
 export const VALIDATION_METRICS: ReadonlyArray<{ key: ValidationMetric; label: string; unit: string }> = [
   { key: "averageThrustN", label: "평균 추력", unit: "N" },
   { key: "maximumPressureMpa", label: "최대 압력", unit: "MPa" },
@@ -57,6 +75,21 @@ export function compareValidationMetric(metric: ValidationMetric, predicted: num
 
 export function compareValidationRecord(record: ExternalValidationRecord, predicted: Partial<Record<ValidationMetric, number>>): ValidationComparison[] {
   return VALIDATION_METRICS.map(({ key }) => compareValidationMetric(key, predicted[key], record.measured[key], record.tolerances[key]));
+}
+
+export function getValidationQualityWarnings(record: ExternalValidationRecord, currentVersions: ExternalValidationVersions, records: readonly ExternalValidationRecord[] = []): ExternalValidationQualityWarning[] {
+  const warnings = new Set<ExternalValidationQualityWarning>();
+  for (const { key } of VALIDATION_METRICS) {
+    if (!record.units?.[key]) warnings.add("unit-missing");
+    if (record.measured?.[key] === undefined) warnings.add("measurement-missing");
+    if (record.measured?.[key] !== undefined && record.tolerances?.[key] === undefined) warnings.add("tolerance-missing");
+  }
+  if (!record.conditionsMemo.trim()) warnings.add("conditions-missing");
+  if (!record.dataVersion.trim() || record.dataVersion === "식별자 미기록") warnings.add("data-version-missing");
+  if (!record.sourceDescription.trim() || record.sourceDescription === "출처 미기록") warnings.add("source-missing");
+  if (record.appVersion !== currentVersions.appVersion || record.engineVersion !== currentVersions.engineVersion || record.baselineVersion !== currentVersions.baselineVersion || record.gsrmReferenceVersion !== currentVersions.gsrmReferenceVersion || record.anCatalogVersion !== currentVersions.anCatalogVersion) warnings.add("version-mismatch");
+  if (records.some((other) => other.id !== record.id && other.name === record.name && other.recordedAt === record.recordedAt)) warnings.add("duplicate-possible");
+  return [...warnings];
 }
 
 export function isExternalValidationRecord(value: unknown): value is ExternalValidationRecord {

@@ -61,6 +61,7 @@ export {
   VALIDATION_METRICS,
   compareValidationMetric,
   compareValidationRecord,
+  getValidationQualityWarnings,
   isExternalValidationRecord,
   parseExternalValidationBackup,
 } from "./external-validation";
@@ -71,6 +72,8 @@ export type {
   ExternalValidationRecord,
   ExternalValidationBackup,
   ValidationComparison,
+  ExternalValidationQualityWarning,
+  ExternalValidationVersions,
 } from "./external-validation";
 export type {
   BurnAreaBreakdown,
