@@ -213,6 +213,45 @@ describe("automatic candidate envelope", () => {
     expect(result.candidates[0].score.averageThrustErrorNormalized).toBe(0);
   });
 
+  it("keeps mass and calculated pressure independent of the pressure limit", () => {
+    const base = createAutomaticCandidateSearchConfig({ ...BASE_CONFIG, targetFuelMassKg: 0.3956, targetThrustEnabled: false });
+    const lowPressure = searchCandidates({ ...base, maximumPressureMpa: 3.6 });
+    const baselinePressure = searchCandidates({ ...base, maximumPressureMpa: 4.1 });
+    const project = (result: typeof lowPressure) => new Map(result.candidates.map((candidate) => [
+      `${candidate.input.grainOuterDiameterMm}×${candidate.input.grainCoreDiameterMm}×${candidate.input.segmentLengthMm}/${candidate.input.segmentCount}`,
+      { mass: candidate.grainMassKg, pressure: candidate.maximumPressureMpa },
+    ]));
+    const low = project(lowPressure);
+    const baseline = project(baselinePressure);
+    expect([...low.keys()].sort()).toEqual([...baseline.keys()].sort());
+    for (const [geometry, values] of low) {
+      expect(values.mass).toBe(baseline.get(geometry)!.mass);
+      expect(values.pressure).toBe(baseline.get(geometry)!.pressure);
+    }
+    const baselineStatuses = new Map(baselinePressure.candidates.map((candidate) => [
+      `${candidate.input.grainOuterDiameterMm}×${candidate.input.grainCoreDiameterMm}×${candidate.input.segmentLengthMm}/${candidate.input.segmentCount}`,
+      candidate.status,
+    ]));
+    expect(lowPressure.candidates.some((candidate) => candidate.status !== baselineStatuses.get(`${candidate.input.grainOuterDiameterMm}×${candidate.input.grainCoreDiameterMm}×${candidate.input.segmentLengthMm}/${candidate.input.segmentCount}`))).toBe(true);
+  });
+
+  it("keeps mass and pressure metrics independent of an optional thrust target", () => {
+    const base = createAutomaticCandidateSearchConfig({ ...BASE_CONFIG, targetFuelMassKg: 0.3956, maximumPressureMpa: 4.1 });
+    const withoutThrust = searchCandidates({ ...base, targetThrustEnabled: false });
+    const withThrust = searchCandidates({ ...base, targetThrustEnabled: true, targetAverageThrustN: 310 });
+    const key = (candidate: (typeof withoutThrust.candidates)[number]) => `${candidate.input.grainOuterDiameterMm}×${candidate.input.grainCoreDiameterMm}×${candidate.input.segmentLengthMm}/${candidate.input.segmentCount}`;
+    const thrustMap = new Map(withThrust.candidates.map((candidate) => [key(candidate), candidate]));
+    expect(withoutThrust.candidates.map(key).sort()).toEqual(withThrust.candidates.map(key).sort());
+    for (const candidate of withoutThrust.candidates) {
+      const withTarget = thrustMap.get(key(candidate))!;
+      expect(candidate.grainMassKg).toBe(withTarget.grainMassKg);
+      expect(candidate.maximumPressureMpa).toBe(withTarget.maximumPressureMpa);
+      expect(candidate.burnTimeSec).toBe(withTarget.burnTimeSec);
+      expect(candidate.thrustEvaluation).toBeUndefined();
+      expect(withTarget.thrustEvaluation).toBeDefined();
+    }
+  });
+
   it("reports the real limiting condition for a 1 kg target", () => {
     const automatic = createAutomaticCandidateSearchConfig({ ...BASE_CONFIG, targetFuelMassKg: 1, maximumPressureMpa: 4.1, targetThrustEnabled: false });
     const result = searchCandidates(automatic);

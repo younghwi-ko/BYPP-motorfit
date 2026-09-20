@@ -89,6 +89,10 @@ test("AN 241개, 검색, 필터, 3개 비교, 내보내기", async ({ page }) =>
   const jsonEvent = await jsonDownload; const jsonPath = await jsonEvent.path(); expect(jsonPath).toBeTruthy(); expect(jsonEvent.suggestedFilename()).toBe("motorfit-results.json");
   const payload = JSON.parse(await readFile(jsonPath!, "utf8"));
   expect(payload.input).toBeTruthy(); expect(payload.search).toBeTruthy(); expect(payload.referenceCandidate).toBeDefined();
+  expect(payload.calculationFlow).toEqual(["질량 계산", "압력 조건 적용", "추력 조건 적용(입력 시)", "최종 후보 판정"]);
+  expect(payload.resultSemantics.massCalculation).toContain("형상·연료 밀도·세그먼트");
+  expect(payload.resultSemantics.pressureCondition).toContain("최대 압력");
+  expect(payload.resultSemantics.targetThrustCondition).toBe("미입력·미계산");
   expect(payload.an.catalogSize).toBe(241); expect(payload.an.query).toBeDefined(); expect(payload.an.page).toBeDefined(); expect(payload.referenceRule).toContain("추천·조건부"); expect((await readFile(csvPath!, "utf8")).length).toBeGreaterThan(100);
   expect(payload.input.fuelMassToleranceDisplay).toBe("0.010 kg"); expect(payload.search.counts.referenceRejected).toBe(0); expect(payload.representativeCandidate).toBeDefined();
   expect(payload.metadata.engineVersion).toBe("candidate-search-1"); expect(payload.metadata.status).toBe("completed"); expect(payload.metadata.anCatalogItemCount).toBe(241); expect(payload.metadata.calculatedAt).toBeTruthy();
@@ -394,6 +398,10 @@ test("설계 검토 리포트 인쇄와 저장 결과 리포트", async ({ page 
   await page.getByRole("button", { name: /인쇄 \/ PDF로 저장 · 설계 검토 리포트/ }).click();
   const currentReport = await currentReportPopup;
   await expect(currentReport.getByText("MotorFit 설계 검토 리포트", { exact: true })).toBeVisible();
+  await expect(currentReport.getByText("계산 흐름", { exact: true })).toBeVisible();
+  await expect(currentReport.getByText(/질량 계산 결과/)).toBeVisible();
+  await expect(currentReport.getByText(/압력 조건 판정/)).toBeVisible();
+  await expect(currentReport.getByText(/추력 조건 판정/)).toBeVisible();
   await expect(currentReport.getByText(/PDF로 저장/)).toBeVisible();
   await expect.poll(() => currentReport.locator("html").getAttribute("data-print-called"), { timeout: 5_000 }).toBe("true");
   await page.getByText("계산 결과 이력", { exact: true }).click();
