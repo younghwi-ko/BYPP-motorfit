@@ -105,6 +105,26 @@ test("AN 241개, 검색, 필터, 3개 비교, 내보내기", async ({ page }) =>
   await expect(page.getByText(/저장 결과 비교 · 차이만 강조/)).toBeVisible();
 });
 
+test("외부 검증 데이터 저장·비교·백업", async ({ page }) => {
+  await page.addInitScript(() => localStorage.clear()); await page.goto("/"); await page.waitForTimeout(1000);
+  await calculate(page, "0.3956", "4.1", "");
+  await page.getByText("외부 검증 데이터 비교", { exact: true }).click();
+  await page.getByLabel("검증 데이터 이름").fill("시험 기록 A");
+  await page.getByLabel("검증 데이터 출처").fill("독립 시험 기록");
+  await page.getByLabel("검증 데이터 버전").fill("test-1");
+  await page.getByLabel("측정값 평균 추력").fill("200");
+  await page.getByLabel("허용 오차 평균 추력").fill("1000");
+  await page.getByRole("button", { name: "검증 데이터 저장" }).click();
+  await expect(page.getByText("시험 기록 A", { exact: true })).toBeVisible();
+  await expect(page.getByText("범위 내")).toBeVisible();
+  const download = page.waitForEvent("download"); await page.getByRole("button", { name: "검증 데이터 JSON 백업" }).click();
+  const event = await download; expect(event.suggestedFilename()).toBe("motorfit-external-validation-backup.json");
+  const path = await event.path(); expect(path).toBeTruthy();
+  const { readFile } = await import("node:fs/promises"); const backup = JSON.parse(await readFile(path!, "utf8"));
+  expect(backup.schemaVersion).toBe(1); expect(backup.records).toHaveLength(1); expect(JSON.stringify(backup)).not.toMatch(/password|api[_-]?key|secret|token|process\.env/i);
+  await page.getByRole("button", { name: "삭제", exact: true }).click(); await expect(page.getByText("선택한 계산 결과에 연결된 외부 검증 데이터가 없습니다.")).toBeVisible();
+});
+
 test("초보자 사용 설명서와 메인 화면 이동", async ({ page }) => {
   await page.goto("/guide");
   await expect(page.getByRole("heading", { name: "처음이라면, 이 순서로 보세요." })).toBeVisible();

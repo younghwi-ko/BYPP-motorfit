@@ -1,0 +1,73 @@
+export const EXTERNAL_VALIDATION_STORAGE_KEY = "motorfit-external-validation-v1";
+export const EXTERNAL_VALIDATION_SCHEMA_VERSION = 1 as const;
+
+export type ValidationMetric = "averageThrustN" | "maximumPressureMpa" | "burnTimeSec" | "totalImpulseNs";
+export type ExternalValidationMeasurements = Partial<Record<ValidationMetric, number>>;
+export type ExternalValidationTolerances = Partial<Record<ValidationMetric, number>>;
+
+export interface ExternalValidationRecord {
+  id: string;
+  name: string;
+  recordedAt: string;
+  sourceDescription: string;
+  calculationResultId: string;
+  measured: ExternalValidationMeasurements;
+  tolerances: ExternalValidationTolerances;
+  conditionsMemo: string;
+  dataVersion: string;
+  units: Record<ValidationMetric, string>;
+  appVersion: string;
+  engineVersion: string;
+  baselineVersion: string;
+  gsrmReferenceVersion: string;
+  anCatalogVersion: string;
+}
+
+export interface ExternalValidationBackup {
+  app: "MotorFit";
+  schemaVersion: typeof EXTERNAL_VALIDATION_SCHEMA_VERSION;
+  exportedAt: string;
+  records: ExternalValidationRecord[];
+}
+
+export interface ValidationComparison {
+  metric: ValidationMetric;
+  predicted: number | null;
+  measured: number | null;
+  absoluteDifference: number | null;
+  relativeDifferencePercent: number | null;
+  tolerance: number | null;
+  status: "within" | "outside" | "unavailable" | "tolerance-unset";
+}
+
+export const VALIDATION_METRICS: ReadonlyArray<{ key: ValidationMetric; label: string; unit: string }> = [
+  { key: "averageThrustN", label: "평균 추력", unit: "N" },
+  { key: "maximumPressureMpa", label: "최대 압력", unit: "MPa" },
+  { key: "burnTimeSec", label: "연소시간", unit: "s" },
+  { key: "totalImpulseNs", label: "총 충격량", unit: "N·s" },
+];
+
+export function compareValidationMetric(metric: ValidationMetric, predicted: number | undefined, measured: number | undefined, tolerance: number | undefined): ValidationComparison {
+  if (!Number.isFinite(predicted) || !Number.isFinite(measured)) return { metric, predicted: Number.isFinite(predicted) ? predicted! : null, measured: Number.isFinite(measured) ? measured! : null, absoluteDifference: null, relativeDifferencePercent: null, tolerance: Number.isFinite(tolerance) ? tolerance! : null, status: "unavailable" };
+  const absoluteDifference = Math.abs(predicted! - measured!);
+  const relativeDifferencePercent = predicted === 0 ? null : (absoluteDifference / Math.abs(predicted!)) * 100;
+  const normalizedTolerance = Number.isFinite(tolerance) && tolerance! >= 0 ? tolerance! : null;
+  return { metric, predicted: predicted!, measured: measured!, absoluteDifference, relativeDifferencePercent, tolerance: normalizedTolerance, status: normalizedTolerance === null ? "tolerance-unset" : absoluteDifference <= normalizedTolerance ? "within" : "outside" };
+}
+
+export function compareValidationRecord(record: ExternalValidationRecord, predicted: Partial<Record<ValidationMetric, number>>): ValidationComparison[] {
+  return VALIDATION_METRICS.map(({ key }) => compareValidationMetric(key, predicted[key], record.measured[key], record.tolerances[key]));
+}
+
+export function isExternalValidationRecord(value: unknown): value is ExternalValidationRecord {
+  if (!value || typeof value !== "object") return false;
+  const item = value as Partial<ExternalValidationRecord>;
+  return typeof item.id === "string" && typeof item.name === "string" && typeof item.recordedAt === "string" && typeof item.sourceDescription === "string" && typeof item.calculationResultId === "string" && Boolean(item.measured && typeof item.measured === "object") && Boolean(item.tolerances && typeof item.tolerances === "object") && typeof item.conditionsMemo === "string" && typeof item.dataVersion === "string" && Boolean(item.units && typeof item.units === "object") && typeof item.appVersion === "string" && typeof item.engineVersion === "string" && typeof item.baselineVersion === "string" && typeof item.gsrmReferenceVersion === "string" && typeof item.anCatalogVersion === "string";
+}
+
+export function parseExternalValidationBackup(value: unknown): ExternalValidationRecord[] {
+  if (!value || typeof value !== "object") throw new Error("검증 데이터 백업 형식이 올바르지 않습니다.");
+  const backup = value as Partial<ExternalValidationBackup>;
+  if (backup.app !== "MotorFit" || backup.schemaVersion !== EXTERNAL_VALIDATION_SCHEMA_VERSION || !Array.isArray(backup.records) || backup.records.some((record) => !isExternalValidationRecord(record))) throw new Error("지원하지 않는 검증 데이터 백업입니다.");
+  return backup.records;
+}

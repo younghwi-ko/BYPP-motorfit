@@ -55,6 +55,23 @@ export { VALIDATION_FIXTURES, createValidationSearchConfig } from "./validation-
 export type { ValidationFixture } from "./validation-fixtures";
 export { validateFixture, notRunValidation } from "./validation-report";
 export type { ValidationCheck, ValidationCheckKind, ValidationFixtureResult } from "./validation-report";
+export {
+  EXTERNAL_VALIDATION_STORAGE_KEY,
+  EXTERNAL_VALIDATION_SCHEMA_VERSION,
+  VALIDATION_METRICS,
+  compareValidationMetric,
+  compareValidationRecord,
+  isExternalValidationRecord,
+  parseExternalValidationBackup,
+} from "./external-validation";
+export type {
+  ValidationMetric,
+  ExternalValidationMeasurements,
+  ExternalValidationTolerances,
+  ExternalValidationRecord,
+  ExternalValidationBackup,
+  ValidationComparison,
+} from "./external-validation";
 export type {
   BurnAreaBreakdown,
   BurnRateCoefficients,
