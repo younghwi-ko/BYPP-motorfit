@@ -2,50 +2,47 @@ import Link from "next/link";
 import { DEMO_INPUT } from "../demo-config";
 
 const steps = [
-  { title: "1. 입력하기", body: "목표 질량(연료가 되길 바라는 양)과 최대 허용 압력을 입력하세요. 목표 평균 추력은 알고 있을 때만 입력하면 됩니다." },
-  { title: "2. 순서대로 계산하기", body: "질량 계산 → 압력 조건 적용 → 추력 조건 적용(입력한 경우) → 최종 후보 판정 순서로 버튼을 누르세요. 압력은 계산된 질량 후보를 바꾸지 않고 허용값과 비교합니다." },
-  { title: "3. 결과 읽기", body: "추천 후보를 먼저 보고, 질량·압력·추력·연소시간이 목표와 얼마나 가까운지 비교하세요. 선택 후보에서 그래프와 GSRM 검사를 확인할 수 있습니다." },
+  { number: "1", title: "목표 입력", body: "목표 연료 질량과 최대 허용 압력을 입력합니다. 목표 평균 추력은 알고 있을 때만 입력합니다." },
+  { number: "2", title: "계산 실행", body: "질량 계산 → 압력 조건 적용 → 추력 조건 적용(입력 시) → 최종 후보 판정 순서로 진행합니다." },
+  { number: "3", title: "후보 해석", body: "대표 후보의 질량, 최대 압력, 연소시간, 평균 추력과 판정 이유를 먼저 확인합니다." },
+  { number: "4", title: "상세 검토", body: "필요할 때 그래프와 GSRM·AN, RPA, Fusion 영역을 펼쳐 후속 설계 검토에 사용합니다." },
 ];
 
-const terms = [
-  ["질량", "계산된 추진제 질량입니다. 목표값 이하이면서 허용 오차 안에 있는 후보를 우선합니다."],
-  ["압력", "연소 중 예상되는 최대 챔버 압력입니다. 입력한 최대 허용 압력을 넘지 않아야 합니다."],
-  ["추력", "모터가 내는 힘(N)입니다. 목표 추력을 입력하면 추력 곡선 오차도 함께 비교합니다."],
-  ["연소시간", "추력이 발생하는 예상 시간(s)입니다. 후보 간 연소 특성을 비교하는 데 사용합니다."],
-  ["Kn", "연소면적과 노즐 목 면적의 비율입니다. 시간에 따른 압력·추력 변화 그래프에서 확인합니다."],
-];
+const statuses = [
+  ["추천", "질량과 압력 등 현재 판정 기준을 만족한 후보입니다.", "text-emerald-700"],
+  ["조건부", "일부 조건이 미입력 또는 별도 확인 대상인 후보입니다. 추천과 동일하지 않습니다.", "text-cyan-800"],
+  ["참고용 탈락", "추천과 조건부가 모두 없을 때 목표 질량에 가장 가까운 탈락 후보 한 개를 참고로 표시합니다.", "text-violet-800"],
+  ["탈락", "하나 이상의 조건을 만족하지 못한 후보입니다. 상세 보기에서 실패 사유를 확인합니다.", "text-rose-700"],
+] as const;
 
 export default function GuidePage() {
   return (
-    <main className="min-h-screen px-4 py-6 text-slate-950 sm:px-8 sm:py-10">
+    <main className="motorfit-guide min-h-screen px-4 py-6 sm:px-8 sm:py-10">
       <div className="mx-auto max-w-5xl">
-        <header className="rounded-3xl border border-cyan-200 bg-white p-6 shadow-sm sm:p-10">
-          <Link href="/" className="inline-flex rounded-lg px-2 py-1 text-sm font-bold text-cyan-800 underline-offset-4 hover:underline focus:outline-none focus:ring-2 focus:ring-cyan-500">← 계산 화면으로 돌아가기</Link>
-          <p className="mt-8 text-xs font-bold uppercase tracking-[0.24em] text-cyan-700">MotorFit · 초보자 안내</p>
-          <h1 className="mt-3 text-3xl font-black tracking-tight sm:text-5xl">처음이라면, 이 순서로 보세요.</h1>
-          <p className="mt-4 max-w-3xl text-base leading-7 text-slate-700 sm:text-lg">MotorFit은 목표에 가까우면서 압력 조건을 지키는 그레인 형상을 찾아 비교하는 교육용 설계 검토 도구입니다. 계산 결과는 답 하나가 아니라, 설계 선택을 이해하기 위한 근거로 사용하세요.</p>
-          <div className="mt-6 rounded-2xl border-2 border-amber-300 bg-amber-50 px-4 py-4 text-sm font-semibold leading-6 text-amber-950" role="note"><strong>중요:</strong> 실제 제작·점화용 절차나 안전 승인을 대신하지 않습니다. 실제 설계에는 자격 있는 전문가의 검토와 별도 안전 검증이 필요합니다.</div>
+        <header className="border-b border-slate-300 pb-7">
+          <nav className="flex flex-wrap items-center justify-between gap-3" aria-label="사용 설명서 탐색"><Link href="/" className="text-sm font-semibold text-cyan-800 underline-offset-4 hover:underline">← 계산 화면</Link><Link href="/" className="inline-flex items-center justify-center rounded-md bg-cyan-800 px-4 py-2.5 text-sm font-bold text-white hover:bg-cyan-900">기준 예시로 시작</Link></nav>
+          <p className="guide-kicker mt-8">BYPP MotorFit 사용 설명서</p>
+          <h1 className="mt-2 text-3xl font-bold tracking-tight text-slate-950 sm:text-4xl">입력부터 결과 검토까지</h1>
+          <p className="mt-4 max-w-3xl text-base leading-7 text-slate-700">MotorFit은 목표 조건에 맞는 SRM 형상 후보를 계산하고 비교하는 교육·설계 검토 도구입니다. 먼저 대표 결과를 확인한 뒤 필요한 전문 영역만 펼쳐 보세요.</p>
+          <p className="mt-4 border-l-4 border-amber-500 bg-amber-50 px-4 py-3 text-sm leading-6 text-amber-950" role="note"><strong>사용 범위:</strong> 기준 모델 재현과 설계 비교를 돕지만 실제 하드웨어 검증, 제작 또는 점화 승인을 대신하지 않습니다.</p>
         </header>
 
-        <section className="mt-6" aria-labelledby="quick-start">
-          <div className="flex items-end justify-between gap-3"><div><p className="text-xs font-bold uppercase tracking-[0.18em] text-cyan-700">Quick start</p><h2 id="quick-start" className="mt-1 text-2xl font-black">4단계 빠른 시작</h2></div><Link href="/" className="hidden rounded-xl bg-cyan-700 px-4 py-2 text-sm font-bold text-white hover:bg-cyan-800 focus:outline-none focus:ring-2 focus:ring-cyan-500 sm:inline-flex">계산 시작하기</Link></div>
-          <div className="mt-4 grid gap-3 md:grid-cols-3">{steps.map((step) => <article key={step.title} className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm"><h3 className="text-lg font-black text-slate-950">{step.title}</h3><p className="mt-3 text-sm leading-6 text-slate-700">{step.body}</p></article>)}</div>
-          <div className="mt-4 rounded-2xl border border-cyan-200 bg-cyan-50 px-4 py-4 text-sm leading-6 text-cyan-950"><strong>기본 예시:</strong> 목표 질량 <b>{DEMO_INPUT.targetFuelMassKg.toFixed(4)} kg</b> · 최대 허용 압력 <b>{DEMO_INPUT.maximumPressureMpa.toFixed(1)} MPa</b> · 목표 평균 추력 <b>미입력</b>. 질량은 원하는 추진제 양, 압력은 넘지 않아야 할 상한, 추력은 알고 있을 때만 비교할 힘을 뜻합니다.</div>
+        <section className="mt-8" aria-labelledby="guide-steps"><p className="guide-kicker">빠른 시작</p><h2 id="guide-steps" className="mt-1 text-2xl font-bold text-slate-950">4단계로 사용합니다</h2><ol className="mt-4 divide-y divide-slate-200 border-y border-slate-200 bg-white md:grid md:grid-cols-4 md:divide-x md:divide-y-0">{steps.map((step) => <li key={step.number} className="p-4 sm:p-5"><span className="font-mono text-sm font-bold text-cyan-800">{step.number}</span><h3 className="mt-2 font-bold text-slate-950">{step.title}</h3><p className="mt-2 text-sm leading-6 text-slate-600">{step.body}</p></li>)}</ol><div className="mt-4 flex flex-col gap-3 border border-slate-300 bg-white p-4 sm:flex-row sm:items-center sm:justify-between"><p className="text-sm leading-6 text-slate-700"><strong className="text-slate-950">기준 예시</strong> · 목표 연료 질량 {DEMO_INPUT.targetFuelMassKg.toFixed(4)} kg · 최대 허용 압력 {DEMO_INPUT.maximumPressureMpa.toFixed(1)} MPa · 목표 평균 추력 미입력</p><Link href="/" className="inline-flex shrink-0 items-center justify-center rounded-md bg-cyan-800 px-4 py-2.5 text-sm font-bold text-white hover:bg-cyan-900">계산 화면 열기</Link></div></section>
+
+        <section className="mt-8 grid gap-5 lg:grid-cols-2" aria-label="입력과 판정 안내">
+          <article className="guide-panel p-5 sm:p-6"><p className="guide-kicker">입력</p><h2 className="mt-1 text-xl font-bold text-slate-950">무엇을 입력하나요?</h2><dl className="mt-4 divide-y divide-slate-200 text-sm"><div className="py-3"><dt className="font-bold text-slate-950">목표 연료 질량 <span className="font-normal text-slate-500">kg · 필수</span></dt><dd className="mt-1 leading-6 text-slate-600">원하는 추진제 양입니다. 목표보다 무거운 후보는 추천·조건부가 될 수 없습니다.</dd></div><div className="py-3"><dt className="font-bold text-slate-950">최대 허용 압력 <span className="font-normal text-slate-500">MPa · 필수</span></dt><dd className="mt-1 leading-6 text-slate-600">질량 후보의 계산 압력과 비교하는 상한입니다. 질량 자체를 바꾸는 입력은 아닙니다.</dd></div><div className="py-3"><dt className="font-bold text-slate-950">목표 평균 추력 <span className="font-normal text-slate-500">N · 선택</span></dt><dd className="mt-1 leading-6 text-slate-600">비워두면 목표 추력 오차, MSE, 최대 편차, 변동성, 추력 점수를 계산하지 않습니다.</dd></div><div className="py-3"><dt className="font-bold text-slate-950">상세 탐색 범위</dt><dd className="mt-1 leading-6 text-slate-600">Do·do·Lo와 세그먼트 범위를 직접 정할 때 사용합니다. 제작 후보 모드는 5 mm 간격 규칙을 유지합니다.</dd></div></dl></article>
+          <article className="guide-panel p-5 sm:p-6"><p className="guide-kicker">결과</p><h2 className="mt-1 text-xl font-bold text-slate-950">후보 상태를 읽는 법</h2><div className="mt-4 divide-y divide-slate-200">{statuses.map(([label, body, tone]) => <div key={label} className="py-3"><h3 className={`text-sm font-bold ${tone}`}>{label}</h3><p className="mt-1 text-sm leading-6 text-slate-600">{body}</p></div>)}</div></article>
         </section>
 
-        <section className="mt-6 grid gap-6 lg:grid-cols-2" aria-label="입력과 결과 설명">
-          <article className="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm"><h2 className="text-xl font-black">무엇을 입력하나요?</h2><ul className="mt-4 space-y-3 text-sm leading-6 text-slate-700"><li><b className="text-slate-950">목표 질량:</b> 원하는 연료 질량입니다. 질량이 클수록 더 큰 형상이나 탐색 확장이 필요할 수 있습니다.</li><li><b className="text-slate-950">최대 허용 압력:</b> 후보가 이 값을 넘으면 추천이 될 수 없습니다.</li><li><b className="text-slate-950">목표 평균 추력:</b> 선택 입력입니다. 비워두면 MSE·최대 편차·추력 변동성·추력 점수를 계산하지 않습니다.</li><li><b className="text-slate-950">상세 범위:</b> 제작 후보 모드는 기본 5 mm 간격을 사용합니다. 범위를 좁히면 계산과 비교가 쉬워집니다.</li></ul></article>
-          <article className="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm"><h2 className="text-xl font-black">결과를 어떻게 읽나요?</h2><div className="mt-4 space-y-3 text-sm leading-6 text-slate-700"><p><b className="text-emerald-700">추천:</b> 현재 기준에서 질량·압력 등 핵심 조건을 함께 만족하는 후보입니다.</p><p><b className="text-cyan-800">조건부:</b> 일부 선택 조건이 미입력 또는 별도 판정 대상이라 확정 추천이 아닌 후보입니다.</p><p><b className="text-violet-800">참고용 탈락:</b> 추천 후보가 없을 때 목표 질량에 가장 가까운 탈락 후보를 참고로 보여줍니다.</p><p><b className="text-amber-800">탈락:</b> 하나 이상의 조건을 만족하지 못한 후보입니다. 행을 열어 판정 사유를 확인하세요.</p></div></article>
-        </section>
+        <section className="guide-panel mt-5 p-5 sm:p-6" aria-labelledby="search-guide"><p className="guide-kicker">탐색 범위</p><h2 id="search-guide" className="mt-1 text-xl font-bold text-slate-950">자동 확장과 근사 탐색</h2><p className="mt-3 text-sm leading-6 text-slate-700">목표 질량에 맞는 후보가 부족하면 탐색 범위를 단계적으로 넓힙니다. 전체 후보 수와 정밀 계산 수는 구분해 표시합니다. 계산 시간을 관리하기 위해 유망 후보를 정밀 계산하는 근사 탐색이므로 <strong>전역 최적해를 보장하지 않습니다.</strong> 결과의 자동 확장 단계와 실제 탐색 범위를 함께 확인하세요.</p></section>
 
-        <section className="mt-6 rounded-2xl border border-slate-200 bg-white p-6 shadow-sm" aria-labelledby="terms"><h2 id="terms" className="text-xl font-black">숫자와 전문 용어</h2><div className="mt-4 grid gap-3 sm:grid-cols-2">{terms.map(([term, description]) => <div key={term} className="rounded-xl bg-slate-50 p-4"><h3 className="font-black text-slate-950">{term}</h3><p className="mt-1 text-sm leading-6 text-slate-700">{description}</p></div>)}</div></section>
+        <section className="mt-5 grid gap-5 md:grid-cols-2" aria-label="전문 검토 기능"><article className="guide-panel p-5"><h2 className="text-lg font-bold text-slate-950">GSRM·AN 검사</h2><p className="mt-2 text-sm leading-6 text-slate-600"><strong>GSRM</strong>은 선택 후보의 챔버 내경을 오링 검토 기준 직경 B로 변환합니다. <strong>AN 검사</strong>는 241개 오링 규격의 신장률·압축량·압축률·홈 충전율과 백업 링 조건을 비교합니다.</p></article><article className="guide-panel p-5"><h2 className="text-lg font-bold text-slate-950">RPA·Fusion 검토</h2><p className="mt-2 text-sm leading-6 text-slate-600"><strong>RPA</strong>는 Bell형 노즐 상세해석에 전달할 SRM 계산값과 외부 해석 결과를 분리해 관리합니다. <strong>Fusion</strong>은 챔버·노즐·밀봉·스냅링 등 후속 형상 검토에 사용할 요약을 제공합니다. Fusion 파일이나 제작 도면은 자동 생성하지 않습니다.</p></article></section>
 
-        <section className="mt-6 grid gap-6 lg:grid-cols-2" aria-label="탐색과 GSRM 안내">
-          <article className="rounded-2xl border border-violet-200 bg-violet-50 p-6"><h2 className="text-xl font-black text-violet-950">자동 확장과 근사 탐색</h2><p className="mt-3 text-sm leading-6 text-violet-950">목표 질량이 크면 MotorFit이 탐색 범위를 자동으로 넓힙니다. 계산 시간을 관리하기 위해 전체 조합 중 유망한 일부를 정밀 계산하므로, 화면의 경고처럼 <b>전역 최적해를 보장하지 않습니다.</b> 자동 확장 단계·현재 범위·정밀 계산 수를 함께 보고 결과의 범위를 이해하세요.</p></article>
-          <article className="rounded-2xl border border-cyan-200 bg-cyan-50 p-6"><h2 className="text-xl font-black text-cyan-950">GSRM과 AN 오링 검사</h2><p className="mt-3 text-sm leading-6 text-cyan-950">선택한 SRM 후보의 챔버 내경을 GSRM 기준 직경 B로 변환한 뒤, AN 카탈로그 241개 규격을 기하학적 Engineering Check로 검사합니다. 신장률·압축량·압축률·홈 충전율과 백업 링 조건을 설계 검토 참고값으로 확인하세요.</p></article>
-        </section>
+        <section className="guide-panel mt-5 p-5 sm:p-6" aria-labelledby="review-order"><p className="guide-kicker">권장 확인 순서</p><h2 id="review-order" className="mt-1 text-xl font-bold text-slate-950">계산 후 무엇을 보나요?</h2><ol className="mt-4 grid gap-4 text-sm leading-6 text-slate-700 sm:grid-cols-3"><li><strong className="block text-slate-950">1. 대표 후보</strong>질량과 압력이 목표·상한 안인지 확인합니다.</li><li><strong className="block text-slate-950">2. 판정 이유와 그래프</strong>조건별 실제값과 기준값, 압력·추력·Kn 변화를 확인합니다.</li><li><strong className="block text-slate-950">3. 전문 검토</strong>필요할 때 GSRM·AN, RPA, Fusion 영역을 펼쳐 후속 검토에 사용합니다.</li></ol></section>
 
-        <section className="mt-6 rounded-2xl border-2 border-cyan-300 bg-white p-6 shadow-sm" aria-labelledby="next"><h2 id="next" className="text-xl font-black">계산이 끝난 뒤 할 일</h2><ol className="mt-4 grid gap-3 text-sm leading-6 text-slate-700 sm:grid-cols-3"><li><b className="text-slate-950">1.</b> 추천 후보의 질량과 최대 압력이 목표·상한 안인지 확인합니다.</li><li><b className="text-slate-950">2.</b> 후보를 비교하고 그래프에서 압력·추력·Kn 변화가 어떻게 달라지는지 봅니다.</li><li><b className="text-slate-950">3.</b> GSRM/AN 결과와 판정 사유를 기록하고, 필요하면 범위를 조정해 다시 계산합니다.</li></ol><Link href="/" className="mt-6 inline-flex w-full items-center justify-center rounded-xl bg-cyan-700 px-4 py-3 text-sm font-black text-white hover:bg-cyan-800 focus:outline-none focus:ring-2 focus:ring-cyan-500 sm:w-auto">예시 입력으로 계산 화면 열기</Link></section>
+        <section className="mt-5 border border-amber-300 bg-amber-50 p-5 sm:p-6" aria-labelledby="model-limits"><h2 id="model-limits" className="text-xl font-bold text-amber-950">모델 가정과 계산 한계</h2><p className="mt-3 text-sm leading-6 text-amber-950">재료 편차, 제작 공차, 온도, 노즐과 오링의 실제 상태는 자동 검증하지 않습니다. 실제 시험 데이터가 등록되지 않았다면 하드웨어 검증도 확인되지 않은 상태입니다. 결과는 교육·설계 검토용이며 실제 제작·점화 승인용이 아닙니다.</p></section>
+
+        <footer className="mt-8 flex flex-col gap-3 border-t border-slate-300 pt-6 sm:flex-row sm:items-center sm:justify-between"><p className="text-sm text-slate-600">기준 예시로 전체 흐름을 확인한 뒤 실제 입력을 적용하세요.</p><Link href="/" className="inline-flex items-center justify-center rounded-md bg-cyan-800 px-4 py-2.5 text-sm font-bold text-white hover:bg-cyan-900">기준 예시로 계산 화면 열기</Link></footer>
       </div>
     </main>
   );

@@ -68,6 +68,7 @@ test("잘못된 입력, 취소 후 재계산", async ({ page }) => {
 test("AN 241개, 검색, 필터, 3개 비교, 내보내기", async ({ page }) => {
   await page.addInitScript(() => localStorage.clear()); await page.goto("/"); await page.waitForTimeout(5000);
   await calculate(page, "0.3956", "4.1", "");
+  await page.getByText(/GSRM·AN 오링 검토/).click();
   await page.getByRole("button", { name: "AN 시리즈 전체 검사" }).click();
   await expect(page.getByText("검사 241개")).toBeVisible({ timeout: 30_000 });
   await expect(page.getByText("AN-132-NBR")).toBeVisible();
@@ -234,21 +235,21 @@ test("390px 민감도 비교와 백업 버튼 상호작용", async ({ page }) =>
 
 test("초보자 사용 설명서와 메인 화면 이동", async ({ page }) => {
   await page.goto("/guide");
-  await expect(page.getByRole("heading", { name: "처음이라면, 이 순서로 보세요." })).toBeVisible();
-  await expect(page.getByText("4단계 빠른 시작")).toBeVisible();
+  await expect(page.getByRole("heading", { name: "입력부터 결과 검토까지" })).toBeVisible();
+  await expect(page.getByText("4단계로 사용합니다")).toBeVisible();
   await expect(page.getByText(/0\.3956 kg/)).toBeVisible();
   await expect(page.getByText(/목표 평균 추력 미입력/)).toBeVisible();
   await expect(page.getByText("전역 최적해를 보장하지 않습니다.")).toBeVisible();
-  await page.getByRole("link", { name: "계산 시작하기" }).click();
-  await expect(page.getByRole("heading", { name: "형상 후보를 계산하고 비교합니다." })).toBeVisible();
-  const guideLink = page.getByRole("link", { name: "사용 설명서 열기" });
+  await page.getByRole("link", { name: "기준 예시로 시작" }).click();
+  await expect(page.getByRole("heading", { name: "SRM 후보 계산 및 설계 검토" })).toBeVisible();
+  const guideLink = page.getByRole("link", { name: "사용 설명서", exact: true });
   await guideLink.focus();
   await expect(guideLink).toBeFocused();
   await page.setViewportSize({ width: 390, height: 844 });
   await page.goto("/guide");
-  await expect(page.getByRole("heading", { name: "처음이라면, 이 순서로 보세요." })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "입력부터 결과 검토까지" })).toBeVisible();
   await page.goto("/");
-  await expect(page.getByRole("link", { name: "사용 설명서 열기" })).toBeVisible();
+  await expect(page.getByRole("link", { name: "사용 설명서", exact: true })).toBeVisible();
 });
 
 test("후보 유형별 상세보기와 비교 선택 분리", async ({ page }) => {
@@ -298,9 +299,10 @@ test("390px에서 후보 상세·비교·고급 영역을 직접 조작", async 
   await page.getByRole("button", { name: /상세 보기/ }).first().click();
   await expect(page.getByText(/후보 상세/).first()).toBeVisible();
   const compare = page.getByRole("button", { name: /비교에 추가|비교 후보 선택/ }).first(); await compare.click(); await expect(page.getByText(/선택 후보 비교 \(1\/3\)/)).toBeVisible(); await compare.click();
-  const advanced = page.getByText("고급 검증 · GSRM / AN 검사"); await advanced.click(); await advanced.click(); await expect(page.getByRole("button", { name: "AN 시리즈 전체 검사" })).toBeVisible();
+  const advanced = page.getByText(/GSRM·AN 오링 검토/); await advanced.click(); await expect(page.getByRole("button", { name: "AN 시리즈 전체 검사" })).toBeVisible();
   await page.getByText("압력·추력·Kn 그래프").click(); await expect(page.getByText("추력 · 시간")).toBeVisible();
-  await expect(page.getByText("RPA 상세설계 연계", { exact: true })).toBeVisible();
+  await page.getByText(/Fusion 설계 검토/).click(); await expect(page.getByText("Fusion 별도 검토 체크리스트", { exact: true })).toBeVisible();
+  await page.getByText(/RPA 노즐 상세해석 연계/).click();
   await expect(page.getByText("챔버 압력 / MEOP", { exact: true })).toBeVisible();
   await expect(page.getByText("챔버 수", { exact: true })).toBeVisible();
   expect(await page.getByText("미입력", { exact: true }).count()).toBeGreaterThan(0);

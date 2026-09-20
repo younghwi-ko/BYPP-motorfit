@@ -1,8 +1,11 @@
 @import "tailwindcss";
 
 :root {
-  --background: #f8fafc;
-  --foreground: #0f172a;
+  --background: #f6f7f8;
+  --foreground: #1f2933;
+  --accent: #0f6f82;
+  --accent-dark: #0b5666;
+  --border: #d9dee3;
 }
 
 * {
@@ -15,8 +18,81 @@ html {
 
 body {
   margin: 0;
-  font-family: Arial, Helvetica, sans-serif;
-  background:
-    radial-gradient(circle at 85% 15%, rgb(224 242 254 / 55%), transparent 28rem),
-    var(--background);
+  color: var(--foreground);
+  font-family: Inter, "Pretendard", "Noto Sans KR", "Malgun Gothic", Arial, sans-serif;
+  background: var(--background);
+  text-rendering: optimizeLegibility;
+}
+
+button,
+input,
+select,
+textarea {
+  font: inherit;
+}
+
+:focus-visible {
+  outline: 3px solid rgb(14 116 144 / 35%);
+  outline-offset: 2px;
+}
+
+.motorfit-app,
+.motorfit-guide {
+  color: #1f2933;
+}
+
+.motorfit-app .rounded-3xl,
+.motorfit-app .rounded-2xl,
+.motorfit-guide .rounded-3xl,
+.motorfit-guide .rounded-2xl {
+  border-radius: 0.75rem;
+}
+
+.motorfit-app .shadow-sm,
+.motorfit-app .shadow-lg,
+.motorfit-guide .shadow-sm,
+.motorfit-guide .shadow-lg {
+  box-shadow: none;
+}
+
+.motorfit-app details {
+  border-color: var(--border);
+  background: #fff;
+}
+
+.motorfit-app summary {
+  min-height: 2.5rem;
+  padding-block: 0.35rem;
+  color: #273440;
+}
+
+.motorfit-app table {
+  font-variant-numeric: tabular-nums;
+}
+
+.motorfit-guide .guide-panel {
+  border: 1px solid var(--border);
+  border-radius: 0.75rem;
+  background: #fff;
+}
+
+.motorfit-guide .guide-kicker {
+  color: var(--accent);
+  font-size: 0.75rem;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+@media (max-width: 390px) {
+  html,
+  body {
+    max-width: 100%;
+    overflow-x: hidden;
+  }
+
+  .motorfit-app button,
+  .motorfit-guide a {
+    min-height: 2.5rem;
+  }
 }
