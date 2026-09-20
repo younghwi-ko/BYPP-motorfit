@@ -668,7 +668,7 @@ const requestCancel = () => { cancelRequested.current = true; searchWorker.curre
   };
   const exportSelfCheck = (format: "json" | "csv") => {
     if (!selfCheckReport) { setSelfCheckNotice("먼저 자체 점검을 실행하세요."); return; }
-    const text = format === "json" ? JSON.stringify({ app: "MotorFit", schemaVersion: SELF_CHECK_SCHEMA_VERSION, report: selfCheckReport }, null, 2) : ["case,status,failedFields,summary", ...selfCheckReport.checks.map((item) => [item.name, item.status, item.failedFields.join("; "), item.summary ?? ""].map((value) => JSON.stringify(value)).join(",")), `summary,PASS ${selfCheckReport.counts.pass} FAIL ${selfCheckReport.counts.fail} SKIPPED ${selfCheckReport.counts.skipped}`].join("\n");
+    const text = format === "json" ? JSON.stringify({ app: "MotorFit", schemaVersion: SELF_CHECK_SCHEMA_VERSION, report: selfCheckReport }, null, 2) : ["case,status,actual,expected,differences,failedFields,summary", ...selfCheckReport.checks.map((item) => [item.name, item.status, JSON.stringify(item.actual), JSON.stringify(item.expected), item.checks.filter((check) => !check.pass).map((check) => `${check.field}: ${JSON.stringify(check.actual)} != ${JSON.stringify(check.expected)}`).join("; ") || "없음", item.failedFields.join("; "), item.summary ?? ""].map((value) => JSON.stringify(value)).join(",")), `summary,PASS ${selfCheckReport.counts.pass} FAIL ${selfCheckReport.counts.fail} SKIPPED ${selfCheckReport.counts.skipped}`].join("\n");
     const blob = new Blob([text], { type: format === "json" ? "application/json" : "text/csv;charset=utf-8" });
     const url = URL.createObjectURL(blob); const anchor = document.createElement("a"); anchor.href = url; anchor.download = `motorfit-self-check.${format}`; anchor.click(); URL.revokeObjectURL(url);
   };
