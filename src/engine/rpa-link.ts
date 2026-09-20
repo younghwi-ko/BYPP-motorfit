@@ -62,7 +62,7 @@ export function buildRpaInputSummary(candidate: CandidateResult, config: Candida
     units: { pressure: "MPa", thrust: "N", massFlow: "kg/s", area: "mm²", length: "mm", chamberCount: "개" },
     source: versions,
     separateInputs: ["추진제 열화학 조성·물성", "혼합비 또는 고체 추진제 전용 조성", "평형/동결 해석 설정", "노즐 효율", "RPA 버전과 데이터베이스", "Bell형 노즐 모델 설정"],
-    limitations: ["RPA 연계 정보는 상세설계 참고자료", "RPA 버전·데이터베이스·입력 조건에 따라 결과가 달라질 수 있음", "Bell형 노즐 결과는 별도 해석 결과로 관리", "실제 제작·점화 승인값이 아님", "CAD·재료·열·구조·제작 공차 검토가 별도로 필요함"],
+    limitations: ["RPA 연계 정보는 상세설계 참고자료", "RPA 버전·데이터베이스·입력 조건에 따라 결과가 달라질 수 있음", "Bell형 노즐 결과는 별도 해석 결과로 관리", "실제 제작·점화 승인값이 아님", "Fusion·재료·열·구조·제작 공차 검토가 별도로 필요함"],
   };
 }
 

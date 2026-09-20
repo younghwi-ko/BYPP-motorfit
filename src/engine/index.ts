@@ -117,6 +117,8 @@ export type {
   ThrustCurveEvaluation,
 } from "./types";
 export { buildRpaInputSummary, parseRpaBackup, rpaCandidateKey, RPA_LINK_SCHEMA_VERSION, RPA_LINK_STORAGE_KEY } from "./rpa-link";
+export { buildCadDesignSummary, CAD_CHECKLIST } from "./cad-summary";
+export type { CadDesignSummary } from "./cad-summary";
 export type { RpaInputSummary, RpaResultRecord } from "./rpa-link";
 export type {
   GsrmCalculatorInput,
