@@ -2,7 +2,8 @@
 
 import { useEffect, useMemo, useRef, useState } from "react";
 
-import { AN_SERIES_CATALOG, AN_CATALOG_VERSION, APP_VERSION, BASELINE_VERSION, CALCULATION_ENGINE_VERSION, CandidateSearchCancelledError, CandidateSearchInputError, calculateGsrmReferenceDiameter, DEFAULT_GSRM_WALL_THICKNESS_MM, evaluateAnCatalog, GSRM_REFERENCE_VERSION, VALIDATION_FIXTURES, notRunValidation, MODEL_VALIDATION_LEVEL, BASELINE_REPRODUCTION_STATUS, DETERMINISTIC_CALCULATION_STATUS, HARDWARE_VALIDATION_STATUS, PRODUCTION_APPROVAL_STATUS, VALIDATION_DATA_AVAILABLE, MODEL_ASSUMPTIONS, MODEL_LIMITATIONS } from "../engine";
+import { AN_SERIES_CATALOG, AN_CATALOG_VERSION, APP_VERSION, BASELINE_VERSION, CALCULATION_ENGINE_VERSION, CandidateSearchCancelledError, CandidateSearchInputError, calculateGsrmReferenceDiameter, DEFAULT_GSRM_WALL_THICKNESS_MM, evaluateAnCatalog, GSRM_REFERENCE_VERSION, VALIDATION_FIXTURES, notRunValidation, MODEL_VALIDATION_LEVEL, BASELINE_REPRODUCTION_STATUS, DETERMINISTIC_CALCULATION_STATUS, HARDWARE_VALIDATION_STATUS, PRODUCTION_APPROVAL_STATUS, VALIDATION_DATA_AVAILABLE, MODEL_ASSUMPTIONS, MODEL_LIMITATIONS, SELF_CHECK_MAX_HISTORY, SELF_CHECK_STORAGE_KEY, SELF_CHECK_SCHEMA_VERSION } from "../engine";
+import type { SelfCheckReport } from "../engine";
 import type { GsrmBatchResult } from "../engine";
 import { SCORE_GUIDANCE, sortCandidates } from "./candidate-table";
 import type { CandidateSortDirection, CandidateSortKey } from "./candidate-table";
@@ -349,7 +350,7 @@ function migrateBackup(value: unknown): SavedCalculation[] {
 
 // 브라우저 인쇄 대화상자를 사용하므로 서버·외부 네트워크가 필요하지 않습니다.
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
-function printReviewReport(payload: Record<string, any> | null, status: string, title = "MotorFit 설계 검토 리포트", onStatus?: (message: string) => void) {
+function printReviewReport(payload: Record<string, any> | null, status: string, title = "MotorFit 설계 검토 리포트", onStatus?: (message: string) => void, selfCheck?: SelfCheckReport | null) {
   if (!payload) { onStatus?.("리포트 데이터 없음"); return false; }
   const escapeHtml = (value: unknown) => String(value ?? "미기록").replace(/[&<>\"']/g, (character) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", "\"": "&quot;", "'": "&#39;" }[character] ?? character));
   const metadata = payload?.metadata ?? {};
@@ -375,7 +376,8 @@ function printReviewReport(payload: Record<string, any> | null, status: string, 
   // interactive candidate keeps them as an array. Normalize both shapes so
   // report generation cannot fail before opening the print window.
   const reasons = Array.isArray(candidate?.reasons) ? candidate.reasons : candidate?.reasons ? [String(candidate.reasons)] : [];
-  const report = `<!doctype html><html lang="ko"><head><meta charset="utf-8"><title>${escapeHtml(title)}</title><style>@page{size:A4;margin:16mm}*{box-sizing:border-box}body{font-family:Arial,"Malgun Gothic",sans-serif;color:#172033;line-height:1.5;font-size:11pt}h1{font-size:22pt;margin:0 0 4pt}h2{font-size:14pt;border-bottom:2px solid #0e7490;padding-bottom:4pt;margin-top:18pt}p{margin:5pt 0}.meta{color:#475569;font-size:9pt}.notice{background:#fff7ed;border:1px solid #fdba74;padding:8pt;border-radius:6pt}.grid{display:grid;grid-template-columns:1fr 1fr;gap:5pt 16pt}.row{border-bottom:1px solid #e2e8f0;padding:4pt 0;break-inside:avoid}.label{color:#64748b;font-size:9pt}.value{font-weight:700}.candidate{border:2px solid #0e7490;padding:9pt;border-radius:7pt}.status{font-weight:700}.small{font-size:9pt;color:#475569}@media print{button{display:none}h2{break-after:avoid}.grid{break-inside:avoid}}</style></head><body><h1>${escapeHtml(title)}</h1><p class="meta">프로젝트: BYPP MotorFit · 보고서 생성 시각: ${escapeHtml(new Date().toLocaleString("ko-KR"))}</p><div class="notice"><b>제한:</b> 자동 탐색은 전역 최적해를 보장하지 않습니다. 본 결과는 교육·설계 검토용이며 실제 제작·점화 승인용이 아닙니다. 민감도 결과는 what-if 비교일 뿐 안전·제작 가능 판정이 아닙니다.</div><h2>계산 요약</h2><div class="grid">${rows.map(([label, value]) => `<div class="row"><div class="label">${escapeHtml(label)}</div><div class="value">${escapeHtml(value)}</div></div>`).join("")}</div><h2>대표 후보 판정</h2><div class="candidate"><p><b>상태:</b> <span class="status">${escapeHtml(candidate?.status ?? "선택 후보 없음")}</span></p><p><b>형상:</b> ${escapeHtml(candidate?.geometry ?? "없음")}</p><p><b>판정 이유:</b> ${escapeHtml(reasons.join(" ") || "기록된 실패 사유 없음")}</p><p class="small">목표 추력이 미입력인 경우 MSE·최대 편차·추력 변동성·추력 점수는 계산하지 않습니다.</p></div><h2>GSRM·AN 요약</h2><p>GSRM B 변환값과 AN 카탈로그 판정은 저장된 계산 결과의 metadata를 사용했습니다. ${escapeHtml(payload?.gsrm?.note ?? "AN 검사가 실행되지 않았거나 저장되지 않았습니다.")}</p><p>AN 검사 수: ${escapeHtml(payload?.an?.catalogSize ?? 241)}개 · 추천 ${escapeHtml(payload?.an?.recommend ?? 0)}개 · 조건부 ${escapeHtml(payload?.an?.conditional ?? 0)}개 · 탈락 ${escapeHtml(payload?.an?.fail ?? 0)}개</p><h2>민감도 비교</h2><div class="grid">${sensitivityHtml}</div><h2>외부 검증 데이터 비교</h2><div class="grid">${externalHtml}</div><p class="small">측정값과 계산값의 차이는 모델·입력·측정 조건의 차이를 포함할 수 있으며, 단일 측정은 일반적 신뢰성을 증명하지 않습니다. 데이터 품질과 출처는 사용자가 확인해야 합니다. 비교는 설계 검토용이며 제작·점화 승인이나 안전 판정이 아닙니다.</p><h2>재현 정보</h2><p class="small">앱 ${escapeHtml(metadata.appVersion)} · 엔진 ${escapeHtml(metadata.engineVersion)} · SRM ${escapeHtml(metadata.baselineVersion)} · GSRM ${escapeHtml(metadata.gsrmReferenceVersion)} · AN ${escapeHtml(metadata.anCatalogVersion)}</p><p class="small">검산 상태: ${escapeHtml(payload?.validation?.summary ?? "검산하지 않음")}</p><button onclick="window.print()">인쇄 / PDF로 저장</button></body></html>`;
+  const selfCheckHtml = selfCheck ? `<h2>앱 자체 점검</h2><p class="small">자체 점검 상태: ${escapeHtml(selfCheck.status)} · 실행 시각: ${escapeHtml(selfCheck.executedAt)}</p><p class="small">PASS ${selfCheck.counts.pass} · FAIL ${selfCheck.counts.fail} · SKIPPED ${selfCheck.counts.skipped}</p><div class="grid">${selfCheck.checks.map((item) => `<div class="row"><div class="label">${escapeHtml(item.name)}</div><div class="value">${escapeHtml(item.status)} · ${escapeHtml(item.failedFields.join(", ") || item.summary || "기준 통과")}</div></div>`).join("")}</div><p class="small">${escapeHtml(selfCheck.note)}</p>` : "";
+  const report = `<!doctype html><html lang="ko"><head><meta charset="utf-8"><title>${escapeHtml(title)}</title><style>@page{size:A4;margin:16mm}*{box-sizing:border-box}body{font-family:Arial,"Malgun Gothic",sans-serif;color:#172033;line-height:1.5;font-size:11pt}h1{font-size:22pt;margin:0 0 4pt}h2{font-size:14pt;border-bottom:2px solid #0e7490;padding-bottom:4pt;margin-top:18pt}p{margin:5pt 0}.meta{color:#475569;font-size:9pt}.notice{background:#fff7ed;border:1px solid #fdba74;padding:8pt;border-radius:6pt}.grid{display:grid;grid-template-columns:1fr 1fr;gap:5pt 16pt}.row{border-bottom:1px solid #e2e8f0;padding:4pt 0;break-inside:avoid}.label{color:#64748b;font-size:9pt}.value{font-weight:700}.candidate{border:2px solid #0e7490;padding:9pt;border-radius:7pt}.status{font-weight:700}.small{font-size:9pt;color:#475569}@media print{button{display:none}h2{break-after:avoid}.grid{break-inside:avoid}}</style></head><body><h1>${escapeHtml(title)}</h1><p class="meta">프로젝트: BYPP MotorFit · 보고서 생성 시각: ${escapeHtml(new Date().toLocaleString("ko-KR"))}</p><div class="notice"><b>제한:</b> 자동 탐색은 전역 최적해를 보장하지 않습니다. 본 결과는 교육·설계 검토용이며 실제 제작·점화 승인용이 아닙니다. 민감도 결과는 what-if 비교일 뿐 안전·제작 가능 판정이 아닙니다.</div><h2>계산 요약</h2><div class="grid">${rows.map(([label, value]) => `<div class="row"><div class="label">${escapeHtml(label)}</div><div class="value">${escapeHtml(value)}</div></div>`).join("")}</div><h2>대표 후보 판정</h2><div class="candidate"><p><b>상태:</b> <span class="status">${escapeHtml(candidate?.status ?? "선택 후보 없음")}</span></p><p><b>형상:</b> ${escapeHtml(candidate?.geometry ?? "없음")}</p><p><b>판정 이유:</b> ${escapeHtml(reasons.join(" ") || "기록된 실패 사유 없음")}</p><p class="small">목표 추력이 미입력인 경우 MSE·최대 편차·추력 변동성·추력 점수는 계산하지 않습니다.</p></div><h2>GSRM·AN 요약</h2><p>GSRM B 변환값과 AN 카탈로그 판정은 저장된 계산 결과의 metadata를 사용했습니다. ${escapeHtml(payload?.gsrm?.note ?? "AN 검사가 실행되지 않았거나 저장되지 않았습니다.")}</p><p>AN 검사 수: ${escapeHtml(payload?.an?.catalogSize ?? 241)}개 · 추천 ${escapeHtml(payload?.an?.recommend ?? 0)}개 · 조건부 ${escapeHtml(payload?.an?.conditional ?? 0)}개 · 탈락 ${escapeHtml(payload?.an?.fail ?? 0)}개</p><h2>민감도 비교</h2><div class="grid">${sensitivityHtml}</div><h2>외부 검증 데이터 비교</h2><div class="grid">${externalHtml}</div><p class="small">측정값과 계산값의 차이는 모델·입력·측정 조건의 차이를 포함할 수 있으며, 단일 측정은 일반적 신뢰성을 증명하지 않습니다. 데이터 품질과 출처는 사용자가 확인해야 합니다. 비교는 설계 검토용이며 제작·점화 승인이나 안전 판정이 아닙니다.</p>${selfCheckHtml}<h2>재현 정보</h2><p class="small">앱 ${escapeHtml(metadata.appVersion)} · 엔진 ${escapeHtml(metadata.engineVersion)} · SRM ${escapeHtml(metadata.baselineVersion)} · GSRM ${escapeHtml(metadata.gsrmReferenceVersion)} · AN ${escapeHtml(metadata.anCatalogVersion)}</p><p class="small">검산 상태: ${escapeHtml(payload?.validation?.summary ?? "검산하지 않음")}</p><button onclick="window.print()">인쇄 / PDF로 저장</button></body></html>`;
   const reportWindow = window.open("", "_blank", "width=900,height=700");
   if (!reportWindow) { onStatus?.("인쇄용 창이 차단되었습니다. 브라우저 주소창의 팝업 허용 아이콘을 눌러 이 사이트의 팝업을 허용한 뒤 다시 시도하세요."); return false; }
   reportWindow.document.write(report);
@@ -530,11 +532,18 @@ export default function Home() {
   const [sensitivityName, setSensitivityName] = useState("");
   const [sensitivityRunning, setSensitivityRunning] = useState(false);
   const [sensitivityNotice, setSensitivityNotice] = useState<string | null>(null);
+  const [selfCheckReport, setSelfCheckReport] = useState<SelfCheckReport | null>(null);
+  const [selfCheckHistory, setSelfCheckHistory] = useState<SelfCheckReport[]>([]);
+  const [selfCheckHydrated, setSelfCheckHydrated] = useState(false);
+  const [selfCheckRunning, setSelfCheckRunning] = useState(false);
+  const [selfCheckNotice, setSelfCheckNotice] = useState<string | null>(null);
+  const selfCheckWorker = useRef<Worker | null>(null);
+  const selfCheckBackupInput = useRef<HTMLInputElement | null>(null);
   const sensitivityBackupInput = useRef<HTMLInputElement | null>(null);
   const validationBackupInput = useRef<HTMLInputElement | null>(null);
   const backupFileInput = useRef<HTMLInputElement | null>(null);
 const cancelRequested = useRef(false);
-const requestCancel = () => { cancelRequested.current = true; searchWorker.current?.postMessage({ type: "cancel" }); setProgressText("계산 취소 요청 중… 마지막 완료 단계로 돌아갑니다."); };
+const requestCancel = () => { cancelRequested.current = true; searchWorker.current?.postMessage({ type: "cancel" }); selfCheckWorker.current?.postMessage({ type: "cancel" }); setProgressText("계산 취소 요청 중… 마지막 완료 단계로 돌아갑니다."); if (selfCheckRunning) setSelfCheckNotice("자체 점검 취소 요청 중…"); };
   const searchWorker = useRef<Worker | null>(null);
 
   const inputSignature = useMemo(() => JSON.stringify({ config, targetThrustText, mode, automaticMode }), [automaticMode, config, mode, targetThrustText]);
@@ -600,6 +609,82 @@ const requestCancel = () => { cancelRequested.current = true; searchWorker.curre
   useEffect(() => {
     try { window.localStorage.setItem(SENSITIVITY_STORAGE_KEY, JSON.stringify(sensitivityScenarios.slice(0, 20))); } catch { window.setTimeout(() => setSensitivityNotice("민감도 비교 저장 공간에 접근할 수 없습니다."), 0); }
   }, [sensitivityScenarios]);
+  useEffect(() => {
+    window.setTimeout(() => {
+      try {
+        const raw = window.localStorage.getItem(SELF_CHECK_STORAGE_KEY);
+        if (!raw) { setSelfCheckHydrated(true); return; }
+        const parsed = JSON.parse(raw) as { schemaVersion?: number; reports?: SelfCheckReport[] };
+        if (parsed.schemaVersion !== SELF_CHECK_SCHEMA_VERSION || !Array.isArray(parsed.reports)) throw new Error("invalid self-check storage");
+        const reports = parsed.reports.filter((item) => item && item.schemaVersion === SELF_CHECK_SCHEMA_VERSION && Array.isArray(item.checks)).slice(0, SELF_CHECK_MAX_HISTORY);
+        setSelfCheckHistory(reports);
+        setSelfCheckReport(reports[0] ?? null);
+      } catch {
+        window.localStorage.removeItem(SELF_CHECK_STORAGE_KEY);
+        setSelfCheckNotice("이전 자체 점검 데이터가 손상되어 무시했습니다. 다시 실행할 수 있습니다.");
+      } finally { setSelfCheckHydrated(true); }
+    }, 0);
+  }, []);
+  useEffect(() => {
+    if (!selfCheckHydrated) return;
+    try { window.localStorage.setItem(SELF_CHECK_STORAGE_KEY, JSON.stringify({ app: "MotorFit", schemaVersion: SELF_CHECK_SCHEMA_VERSION, reports: selfCheckHistory.slice(0, SELF_CHECK_MAX_HISTORY) })); } catch { window.setTimeout(() => setSelfCheckNotice("자체 점검 결과를 브라우저에 저장하지 못했습니다."), 0); }
+  }, [selfCheckHistory, selfCheckHydrated]);
+
+  const runSelfCheck = () => {
+    if (selfCheckRunning) return;
+    setSelfCheckRunning(true);
+    setSelfCheckNotice("자체 점검을 준비하는 중…");
+    const worker = new Worker(new URL("../engine/self-check-worker.ts", import.meta.url), { type: "module" });
+    selfCheckWorker.current = worker;
+    worker.onmessage = (event: MessageEvent<{ type: string; completed?: number; total?: number; current?: string; report?: SelfCheckReport; message?: string }>) => {
+      if (event.data.type === "progress") {
+        const completed = event.data.completed ?? 0;
+        const total = event.data.total ?? 1;
+        setProgressPercent((completed / total) * 100);
+        setProgressText(`자체 점검 · ${completed} / ${total} · ${event.data.current ?? "실행 중"}`);
+        setSelfCheckNotice(`자체 점검 실행 중 · ${completed}/${total}`);
+      } else if (event.data.type === "result" && event.data.report) {
+        const report = event.data.report;
+        setSelfCheckReport(report);
+        setSelfCheckHistory((current) => [report, ...current.filter((item) => item.id !== report.id)].slice(0, SELF_CHECK_MAX_HISTORY));
+        setSelfCheckRunning(false);
+        setSelfCheckNotice(`자체 점검 완료 · PASS ${report.counts.pass} · FAIL ${report.counts.fail} · SKIPPED ${report.counts.skipped}`);
+        worker.terminate();
+        selfCheckWorker.current = null;
+      } else if (event.data.type === "cancelled") {
+        setSelfCheckRunning(false);
+        setSelfCheckNotice("자체 점검이 취소되었습니다. 완료된 결과는 PASS로 저장하지 않았습니다.");
+        worker.terminate();
+        selfCheckWorker.current = null;
+      } else if (event.data.type === "error") {
+        setSelfCheckRunning(false);
+        setSelfCheckNotice(`자체 점검 실패: ${event.data.message ?? "알 수 없는 오류"}`);
+        worker.terminate();
+        selfCheckWorker.current = null;
+      }
+    };
+    worker.onerror = () => { setSelfCheckRunning(false); setSelfCheckNotice("자체 점검 Worker 실행에 실패했습니다."); worker.terminate(); selfCheckWorker.current = null; };
+    worker.postMessage({ type: "run", previous: selfCheckReport });
+  };
+  const exportSelfCheck = (format: "json" | "csv") => {
+    if (!selfCheckReport) { setSelfCheckNotice("먼저 자체 점검을 실행하세요."); return; }
+    const text = format === "json" ? JSON.stringify({ app: "MotorFit", schemaVersion: SELF_CHECK_SCHEMA_VERSION, report: selfCheckReport }, null, 2) : ["case,status,failedFields,summary", ...selfCheckReport.checks.map((item) => [item.name, item.status, item.failedFields.join("; "), item.summary ?? ""].map((value) => JSON.stringify(value)).join(",")), `summary,PASS ${selfCheckReport.counts.pass} FAIL ${selfCheckReport.counts.fail} SKIPPED ${selfCheckReport.counts.skipped}`].join("\n");
+    const blob = new Blob([text], { type: format === "json" ? "application/json" : "text/csv;charset=utf-8" });
+    const url = URL.createObjectURL(blob); const anchor = document.createElement("a"); anchor.href = url; anchor.download = `motorfit-self-check.${format}`; anchor.click(); URL.revokeObjectURL(url);
+  };
+  const printSelfCheckReport = () => {
+    if (!selfCheckReport) { setSelfCheckNotice("먼저 자체 점검을 실행하세요."); return; }
+    printReviewReport({ metadata: { appVersion: APP_VERSION, engineVersion: CALCULATION_ENGINE_VERSION, baselineVersion: BASELINE_VERSION, gsrmReferenceVersion: GSRM_REFERENCE_VERSION, anCatalogVersion: AN_CATALOG_VERSION }, validation: { summary: "자체 점검 결과는 하드웨어 검증이 아님" } }, selfCheckReport.status, "MotorFit 앱 자체 점검 리포트", setReportNotice, selfCheckReport);
+  };
+  const importSelfCheck = async (file: File) => {
+    try {
+      const parsed = JSON.parse(await file.text()) as { app?: string; schemaVersion?: number; report?: SelfCheckReport };
+      if (parsed.app !== "MotorFit" || parsed.schemaVersion !== SELF_CHECK_SCHEMA_VERSION || !parsed.report || !Array.isArray(parsed.report.checks)) throw new Error("지원하지 않는 자체 점검 백업 형식입니다.");
+      setSelfCheckReport(parsed.report);
+      setSelfCheckHistory((current) => [parsed.report!, ...current.filter((item) => item.id !== parsed.report!.id)].slice(0, SELF_CHECK_MAX_HISTORY));
+      setSelfCheckNotice("자체 점검 결과를 복원했습니다. 현재 버전과 기준이 다르면 변경 감지를 확인하세요.");
+    } catch (error) { setSelfCheckNotice(error instanceof Error ? `자체 점검 백업을 거부했습니다: ${error.message}` : "자체 점검 백업을 거부했습니다."); } finally { if (selfCheckBackupInput.current) selfCheckBackupInput.current.value = ""; }
+  };
 
   const updateNumber = (key: keyof CandidateSearchConfig, value: number) => setConfig((current) => ({ ...current, [key]: value }));
   const updateRange = (key: "outerDiameterMm" | "coreDiameterMm" | "segmentLengthMm", bound: "min" | "max", value: number) => setConfig((current) => ({ ...current, [key]: { ...current[key], [bound]: value } }));
@@ -1085,6 +1170,7 @@ const requestCancel = () => { cancelRequested.current = true; searchWorker.curre
 {running ? <div className="mt-3 rounded-2xl border-2 border-cyan-300 bg-cyan-50 px-3 py-3 text-xs text-cyan-950 shadow-sm"><div className="flex items-center justify-between gap-3"><span className="font-bold">실행 단계 {runningStage ?? "-"} / 3 · 계산 진행 중</span><span className="font-mono text-cyan-700">{Math.round(progressPercent)}%</span></div><div className="mt-2 h-2 overflow-hidden rounded-full bg-cyan-100"><div className="h-full rounded-full bg-cyan-600 transition-[width]" style={{ width: `${progressPercent}%` }} /></div><div className="mt-2 flex items-center justify-between gap-2"><span>{progressText}</span><button type="button" onClick={requestCancel} className="rounded-lg bg-cyan-700 px-3 py-1.5 font-bold text-white shadow-sm hover:bg-cyan-800">계산 취소</button></div></div> : cancelled ? <div className="mt-3 rounded-2xl border-2 border-amber-300 bg-amber-50 px-3 py-3 text-xs text-amber-950"><p className="font-bold">계산이 취소되었습니다. <span className="font-mono">CANCELLED</span></p><p className="mt-1">마지막 완료 단계: {completedStage} / 3 · 입력을 확인한 뒤 다시 계산할 수 있습니다.</p></div> : lastCalculationStatus === "failed" ? <div className="mt-3 rounded-2xl border-2 border-rose-300 bg-rose-50 px-3 py-3 text-xs text-rose-950"><p className="font-bold">계산에 실패했습니다. <span className="font-mono">FAILED</span></p><p className="mt-1">입력과 탐색 범위를 확인한 뒤 다시 시도하세요.</p></div> : null}
 <p className="mt-3 text-center text-[11px] text-slate-400">계산은 버튼을 누를 때 브라우저에서 실행됩니다.</p>
         {(search || lastCalculationStatus !== "idle") ? <><button type="button" onClick={printCurrentReport} className="mt-3 w-full rounded-xl border border-slate-300 bg-white px-4 py-2.5 text-sm font-bold text-slate-800 shadow-sm hover:bg-slate-50 focus:outline-none focus:ring-2 focus:ring-cyan-500">인쇄 / PDF로 저장 · 설계 검토 리포트</button><p className="mt-2 text-center text-[11px] text-slate-500">인쇄 대화상자에서 대상 프린터를 “PDF로 저장”으로 선택하면 PDF 파일로 저장할 수 있습니다.</p>{reportNotice ? <p role="status" className="mt-2 rounded-lg border border-cyan-200 bg-cyan-50 px-3 py-2 text-xs text-cyan-900">{reportNotice}</p> : null}</> : null}
+        <details className="mt-3 rounded-xl border border-emerald-200 bg-emerald-50/60 px-3 py-2 text-xs text-emerald-950"><summary className="cursor-pointer font-bold">앱 자체 점검</summary><div className="mt-2 space-y-2"><p>기준 fixture와 결정성·단위·저장 schema를 기존 계산 엔진으로 점검합니다. PASS는 앱 자체 회귀 기준 통과이며 하드웨어 시험 검증·안전성·제작 가능성·점화 승인을 의미하지 않습니다.</p><div className="flex flex-wrap gap-2"><button type="button" onClick={runSelfCheck} disabled={selfCheckRunning} className="rounded-lg bg-emerald-700 px-3 py-1.5 font-bold text-white disabled:opacity-50">{selfCheckRunning ? "자체 점검 실행 중…" : "자체 점검 실행"}</button>{selfCheckReport ? <><button type="button" onClick={() => exportSelfCheck("json")} className="rounded-lg border border-emerald-300 bg-white px-2.5 py-1.5 font-bold text-emerald-800">JSON</button><button type="button" onClick={() => exportSelfCheck("csv")} className="rounded-lg border border-emerald-300 bg-white px-2.5 py-1.5 font-bold text-emerald-800">CSV</button><button type="button" onClick={printSelfCheckReport} className="rounded-lg border border-emerald-300 bg-white px-2.5 py-1.5 font-bold text-emerald-800">인쇄/PDF</button></> : null}<input ref={selfCheckBackupInput} type="file" accept="application/json,.json" aria-label="자체 점검 백업 파일 선택" className="sr-only" onChange={(event) => { const file = event.target.files?.[0]; if (file) void importSelfCheck(file); }} /><button type="button" onClick={() => selfCheckBackupInput.current?.click()} className="rounded-lg border border-emerald-300 bg-white px-2.5 py-1.5 font-bold text-emerald-800">JSON 복원</button></div>{selfCheckRunning ? <div className="rounded-lg border border-emerald-300 bg-white px-2 py-1.5"><div className="flex items-center justify-between"><span className="font-bold">{Math.round(progressPercent)}%</span><button type="button" onClick={requestCancel} className="rounded-md bg-emerald-700 px-2 py-1 font-bold text-white">취소</button></div><p>{progressText}</p></div> : null}{selfCheckNotice ? <p role="status" className="rounded-lg border border-emerald-200 bg-white px-2 py-1.5">{selfCheckNotice}</p> : null}{selfCheckReport ? <><p className="font-bold">요약 · 전체 {selfCheckReport.counts.total} · PASS {selfCheckReport.counts.pass} · FAIL {selfCheckReport.counts.fail} · SKIPPED {selfCheckReport.counts.skipped}</p><p>실행 시각 {selfCheckReport.executedAt} · 엔진 {selfCheckReport.versions.engineVersion} · 앱 {selfCheckReport.versions.appVersion}</p>{selfCheckReport.changed ? <p className="rounded-lg border border-amber-300 bg-amber-50 px-2 py-1.5 font-bold text-amber-900">기준 또는 버전 변경 감지: {selfCheckReport.changes.join(", ")} · 자체 점검을 다시 실행하세요.</p> : null}<div className="max-h-72 overflow-auto rounded-lg border border-emerald-200 bg-white"><table className="min-w-[42rem] w-full text-left text-[11px]"><thead><tr className="border-b border-emerald-100"><th className="px-2 py-1.5">케이스</th><th className="px-2 py-1.5">상태</th><th className="px-2 py-1.5">실제 결과</th><th className="px-2 py-1.5">기대 결과</th><th className="px-2 py-1.5">실패 항목</th></tr></thead><tbody>{selfCheckReport.checks.map((item) => <tr key={item.name} className="border-b border-emerald-50"><td className="px-2 py-1.5">{item.name}</td><td className={`px-2 py-1.5 font-bold ${item.status === "PASS" ? "text-emerald-700" : item.status === "FAIL" ? "text-rose-700" : "text-amber-700"}`}>{item.status}</td><td className="max-w-[14rem] px-2 py-1.5 font-mono break-words">{JSON.stringify(item.actual)}</td><td className="max-w-[14rem] px-2 py-1.5 font-mono break-words">{JSON.stringify(item.expected)}</td><td className="px-2 py-1.5">{item.failedFields.join(", ") || "없음"}</td></tr>)}</tbody></table></div><p className="text-[11px]">{selfCheckReport.note}</p></> : <p>아직 실행하지 않음 · 저장된 자체 점검 결과가 있으면 복원되어 표시됩니다.</p>}</div></details>
         </aside>
         <section className="order-1 min-w-0 xl:order-2">{errorMessage ? <div className="mb-4 rounded-2xl border border-rose-200 bg-rose-50 px-4 py-3 text-sm leading-6 text-rose-800">
 <p className="font-bold">입력을 확인하세요</p>

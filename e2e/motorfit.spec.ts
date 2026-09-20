@@ -418,3 +418,38 @@ test("인쇄 팝업 차단 시 명확한 오류 안내", async ({ page }) => {
   await page.getByRole("button", { name: /인쇄 \/ PDF로 저장 · 설계 검토 리포트/ }).click();
   await expect(page.getByRole("status").filter({ hasText: "인쇄용 창이 차단되었습니다" })).toBeVisible();
 });
+
+test("앱 자체 점검 실행·백업·리포트", async ({ page }) => {
+  await page.addInitScript(() => localStorage.clear());
+  const stubPrint = () => { window.print = () => { document.documentElement.setAttribute("data-print-called", "true"); }; };
+  await page.addInitScript(stubPrint);
+  await page.context().addInitScript(stubPrint);
+  await page.setViewportSize({ width: 390, height: 844 });
+  await page.goto("/");
+  await page.getByText("앱 자체 점검", { exact: true }).click();
+  await page.getByRole("button", { name: "자체 점검 실행" }).click();
+  await expect(page.getByRole("status").filter({ hasText: /자체 점검 완료/ })).toBeVisible({ timeout: 300_000 });
+  await expect(page.getByText(/요약 · 전체 .* · PASS/)).toBeVisible();
+  const jsonDownload = page.waitForEvent("download");
+  await page.getByRole("button", { name: "JSON", exact: true }).click();
+  const jsonEvent = await jsonDownload;
+  expect(jsonEvent.suggestedFilename()).toBe("motorfit-self-check.json");
+  const jsonPath = await jsonEvent.path();
+  expect(jsonPath).toBeTruthy();
+  const { readFile } = await import("node:fs/promises");
+  const report = JSON.parse(await readFile(jsonPath!, "utf8"));
+  expect(report.app).toBe("MotorFit");
+  expect(report.report.counts.fail).toBe(0);
+  const csvDownload = page.waitForEvent("download");
+  await page.getByRole("button", { name: "CSV", exact: true }).click();
+  const csvEvent = await csvDownload;
+  expect(csvEvent.suggestedFilename()).toBe("motorfit-self-check.csv");
+  const csvPath = await csvEvent.path();
+  expect(csvPath).toBeTruthy();
+  expect(await readFile(csvPath!, "utf8")).toContain("case,status");
+  const popupEvent = page.waitForEvent("popup");
+  await page.getByRole("button", { name: "인쇄/PDF" }).click();
+  const popup = await popupEvent;
+  await expect(popup.getByText("MotorFit 앱 자체 점검 리포트", { exact: true })).toBeVisible();
+  await expect.poll(() => popup.locator("html").getAttribute("data-print-called"), { timeout: 5_000 }).toBe("true");
+});

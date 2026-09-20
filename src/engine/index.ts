@@ -55,6 +55,8 @@ export { VALIDATION_FIXTURES, createValidationSearchConfig } from "./validation-
 export type { ValidationFixture } from "./validation-fixtures";
 export { validateFixture, notRunValidation } from "./validation-report";
 export type { ValidationCheck, ValidationCheckKind, ValidationFixtureResult } from "./validation-report";
+export { runSelfCheck, changeList, SELF_CHECK_MAX_HISTORY, SELF_CHECK_SCHEMA_VERSION, SELF_CHECK_STORAGE_KEY, SelfCheckCancelledError } from "./self-check";
+export type { SelfCheckItem, SelfCheckOptions, SelfCheckProgress, SelfCheckReport, SelfCheckStatus } from "./self-check";
 export {
   EXTERNAL_VALIDATION_STORAGE_KEY,
   EXTERNAL_VALIDATION_SCHEMA_VERSION,
