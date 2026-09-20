@@ -300,6 +300,20 @@ test("390px에서 후보 상세·비교·고급 영역을 직접 조작", async 
   const compare = page.getByRole("button", { name: /비교에 추가|비교 후보 선택/ }).first(); await compare.click(); await expect(page.getByText(/선택 후보 비교 \(1\/3\)/)).toBeVisible(); await compare.click();
   const advanced = page.getByText("고급 검증 · GSRM / AN 검사"); await advanced.click(); await advanced.click(); await expect(page.getByRole("button", { name: "AN 시리즈 전체 검사" })).toBeVisible();
   await page.getByText("압력·추력·Kn 그래프").click(); await expect(page.getByText("추력 · 시간")).toBeVisible();
+  await expect(page.getByText("RPA 상세설계 연계", { exact: true })).toBeVisible();
+  await expect(page.getByText("챔버 압력 / MEOP", { exact: true })).toBeVisible();
+  await expect(page.getByText("챔버 수", { exact: true })).toBeVisible();
+  expect(await page.getByText("미입력", { exact: true }).count()).toBeGreaterThan(0);
+  await page.getByLabel("RPA 결과 출처").fill("RPA 회귀 기록");
+  await page.getByLabel("RPA 버전").fill("RPA-test");
+  await page.getByLabel("RPA 데이터베이스").fill("CEA-test");
+  await page.getByLabel("RPA 결과값").fill("Bell 결과는 별도 기록");
+  await page.getByRole("button", { name: "RPA 결과 별도 저장" }).click();
+  await expect(page.getByText(/RPA 회귀 기록 · RPA-test · CEA-test/)).toBeVisible();
+  const rpaDownload = page.waitForEvent("download"); await page.getByRole("button", { name: "RPA JSON" }).click();
+  const rpaEvent = await rpaDownload; const rpaPath = await rpaEvent.path(); expect(rpaPath).toBeTruthy();
+  const { readFile: readRpaFile } = await import("node:fs/promises"); const rpaPayload = JSON.parse(await readRpaFile(rpaPath!, "utf8"));
+  expect(rpaPayload.inputSummary.geometry).toBeTruthy(); expect(rpaPayload.inputSummary.values.chamberCount).toBeNull(); expect(rpaPayload.externalResults).toHaveLength(1);
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= 390)).toBe(true);
 });
 

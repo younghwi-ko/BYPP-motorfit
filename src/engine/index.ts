@@ -116,6 +116,8 @@ export type {
   ValidationIssue,
   ThrustCurveEvaluation,
 } from "./types";
+export { buildRpaInputSummary, parseRpaBackup, rpaCandidateKey, RPA_LINK_SCHEMA_VERSION, RPA_LINK_STORAGE_KEY } from "./rpa-link";
+export type { RpaInputSummary, RpaResultRecord } from "./rpa-link";
 export type {
   GsrmCalculatorInput,
   GsrmCheckerInput,
