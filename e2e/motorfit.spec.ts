@@ -17,7 +17,7 @@ async function calculate(page: Page, mass: string, pressure: string, thrust: str
     // it may remain enabled while the worker is processing pressure/final steps.
     // Wait for the user-visible completed stage instead of inferring completion
     // from an unrelated button state.
-    await expect(page.getByText(/단계 3\/3 완료/)).toBeVisible({ timeout: 300_000 });
+    await expect(page.getByText(/단계 4\/4 완료/)).toBeVisible({ timeout: 300_000 });
   };
   await fillVisible("목표 연료 질량 kg", mass);
   await expect(page.locator("aside input[type=number]").nth(0)).toHaveValue(mass);
@@ -231,7 +231,7 @@ test("390px 민감도 비교와 백업 버튼 상호작용", async ({ page }) =>
 test("초보자 사용 설명서와 메인 화면 이동", async ({ page }) => {
   await page.goto("/guide");
   await expect(page.getByRole("heading", { name: "처음이라면, 이 순서로 보세요." })).toBeVisible();
-  await expect(page.getByText("3단계 빠른 시작")).toBeVisible();
+  await expect(page.getByText("4단계 빠른 시작")).toBeVisible();
   await expect(page.getByText(/0\.3956 kg/)).toBeVisible();
   await expect(page.getByText(/목표 평균 추력 미입력/)).toBeVisible();
   await expect(page.getByText("전역 최적해를 보장하지 않습니다.")).toBeVisible();
@@ -333,7 +333,7 @@ test("동일 입력은 동일한 대표 후보를 유지하고 모바일 요약�
   const first = await page.getByTestId("representative-candidate").innerText();
   const firstCounts = await page.getByText(/전체\s+[\d,]+개 · 정밀 계산/).first().innerText();
   await page.getByRole("button", { name: "최종 추천 계산" }).click();
-  await expect(page.getByText(/UI 단계\s*3\s*\/\s*3/)).toBeVisible({ timeout: 300_000 });
+  await expect(page.getByText(/UI 단계\s*4\s*\/\s*4/)).toBeVisible({ timeout: 300_000 });
   const second = await page.getByTestId("representative-candidate").innerText();
   const secondCounts = await page.getByText(/전체\s+[\d,]+개 · 정밀 계산/).first().innerText();
   expect(second).toBe(first);

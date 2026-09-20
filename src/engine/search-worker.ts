@@ -21,7 +21,13 @@ workerScope.onmessage = async (event) => {
     void _passedCandidates;
     void _nearestRejectedCandidate;
     workerScope.postMessage({ type: "result-start", summary, passedIndices, nearestRejectedIndex });
-    for (const candidate of result.candidates) workerScope.postMessage({ type: "candidate", candidate });
+    // Transfer candidate results in bounded batches. This keeps the calculation
+    // result identical while avoiding hundreds of thousands of individual
+    // postMessage callbacks for deliberately broad performance-test ranges.
+    const transferBatchSize = 1000;
+    for (let index = 0; index < result.candidates.length; index += transferBatchSize) {
+      workerScope.postMessage({ type: "candidate-batch", candidates: result.candidates.slice(index, index + transferBatchSize) });
+    }
     workerScope.postMessage({ type: "result-end" });
   } catch (error) {
     if (error instanceof CandidateSearchCancelledError) workerScope.postMessage({ type: "cancelled" });
