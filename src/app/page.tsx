@@ -12,7 +12,7 @@ import type {
   CandidateSearchResult,
 } from "../engine";
 import { DEMO_INPUT } from "./demo-config";
-import { EXTERNAL_VALIDATION_SCHEMA_VERSION, EXTERNAL_VALIDATION_STORAGE_KEY, VALIDATION_METRICS, compareValidationRecord, getValidationQualityWarnings, parseExternalValidationBackup } from "../engine/external-validation";
+import { EXTERNAL_VALIDATION_SCHEMA_VERSION, EXTERNAL_VALIDATION_STORAGE_KEY, STANDARD_UNITS, VALIDATION_METRICS, compareValidationRecord, getValidationQualityWarnings, parseExternalValidationBackup } from "../engine/external-validation";
 import type { ExternalValidationRecord, ValidationMetric } from "../engine/external-validation";
 
 const DEFAULT_FUEL_MASS_TOLERANCE_KG = 0.010;
@@ -56,12 +56,13 @@ const PROPELLANTS = [
 ] as const;
 
 const formatNumber = (value: number, digits = 3) =>
-  value.toLocaleString("ko-KR", { maximumFractionDigits: digits });
+  Number.isFinite(value) ? (Object.is(value, -0) ? 0 : value).toLocaleString("ko-KR", { maximumFractionDigits: digits }) : "미표시";
 
 const formatMassTolerance = (value: number) => `${value.toFixed(3)} kg`;
 
 const VALIDATION_WARNING_LABELS = {
   "unit-missing": "단위 누락",
+  "unit-invalid": "단위 불일치",
   "conditions-missing": "측정 조건 누락",
   "data-version-missing": "데이터 버전 누락",
   "source-missing": "출처 누락",
@@ -646,6 +647,7 @@ const requestCancel = () => { cancelRequested.current = true; searchWorker.curre
     const representative = selected ?? referenceCandidate;
     const metadata = search.metadata ?? { appVersion: "0.1.0", engineVersion: "candidate-search-1", calculatedAt: new Date().toISOString(), input: { ...config }, fuelMassToleranceKg: config.fuelMassToleranceKg, searchMode: mode, automaticExpansionStage: search.automaticExpansionStage, totalCombinations: search.totalCombinations, evaluatedCombinations: search.evaluatedCombinations, calculationFailures: search.calculationFailures, counts: { recommend: candidateCounts.pass, conditional: candidateCounts.conditional, referenceRejected: referenceCandidate ? 1 : 0, rejected: candidateCounts.fail }, baselineVersion: "SRM_2023.xls-baseline", gsrmReferenceVersion: "GSRM-engineering-targets-v1", anCatalogVersion: "AS568A-supplied-catalog", anCatalogItemCount: 241, status: "completed" as const };
     const validation = { calculationStatus: lastCalculationStatus === "completed" ? "COMPLETED" : lastCalculationStatus.toUpperCase(), baselineStatus: "PASS", liveFixtureStatus: "NOT_RUN", status: "NOT_RUN" as const, summary: "현재 결과에 대한 별도 fixture 재검산: 실행하지 않음", fixtures: VALIDATION_FIXTURES.map(notRunValidation) };
+    metadata.units = STANDARD_UNITS;
     return { metadata, modelValidationLevel: MODEL_VALIDATION_LEVEL, baselineReproductionStatus: BASELINE_REPRODUCTION_STATUS, deterministicCalculationStatus: DETERMINISTIC_CALCULATION_STATUS, hardwareValidationStatus: HARDWARE_VALIDATION_STATUS, productionApprovalStatus: PRODUCTION_APPROVAL_STATUS, assumptions: MODEL_ASSUMPTIONS, limitations: MODEL_LIMITATIONS, validationDataAvailable: VALIDATION_DATA_AVAILABLE, exportedAt: new Date().toISOString(), input: { ...config, fuelMassToleranceDisplay: formatMassTolerance(config.fuelMassToleranceKg), targetThrustText, targetThrustEnabled: targetThrustText.trim() !== "" }, search: { totalCombinations: search.totalCombinations, evaluatedCombinations: search.evaluatedCombinations, automaticExpansionStage: search.automaticExpansionStage ?? 0, searchEnvelope: search.searchEnvelope, warning: search.warning, diagnosis: search.diagnosis, counts: { recommend: candidateCounts.pass, conditional: candidateCounts.conditional, referenceRejected: referenceCandidate ? 1 : 0, rejected: candidateCounts.fail } }, candidates: rows, representativeCandidate: representative ? rows[search.candidates.indexOf(representative)] : null, selectedCandidates: comparison.map((candidate) => rows[search.candidates.indexOf(candidate)]), referenceCandidate: referenceCandidate ? rows[search.candidates.indexOf(referenceCandidate)] : null, referenceRule: "추천·조건부 후보가 없을 때만 목표 질량에 가장 가까운 탈락 후보 1개를 참고용으로 표시", externalValidation: externalValidationRecords.filter((record) => record.calculationResultId === "current"), gsrm: selected ? { referenceDiameterMm: gsrmReferenceDiameterMm, note: "선택 후보의 GSRM B 변환값. AN 검사는 화면에서 실행한 결과를 기준으로 합니다." } : null, an: anExportState ? { catalogSize: anExportState.total, query: anExportState.query, page: anExportState.page, pageCount: anExportState.pageCount, recommend: anExportState.recommend, conditional: anExportState.conditional, fail: anExportState.fail } : { catalogSize: 241, query: "미실행", page: 0, pageCount: 0, recommend: 0, conditional: 0, fail: 0 }, validation };
   };
   const hasCurrentValidation = externalValidationRecords.some((record) => record.calculationResultId === "current");

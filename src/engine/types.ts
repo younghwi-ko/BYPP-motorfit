@@ -372,6 +372,7 @@ export interface CalculationMetadata {
   anCatalogVersion: string;
   anCatalogItemCount: number;
   status: "completed" | "cancelled" | "failed";
+  units?: { mass: string; pressure: string; thrust: string; time: string; length: string; impulse: string; specificImpulse: string };
 }
 
 export interface CandidateSearchProgress {

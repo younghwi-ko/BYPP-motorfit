@@ -42,6 +42,7 @@ export interface ValidationComparison {
 
 export type ExternalValidationQualityWarning =
   | "unit-missing"
+  | "unit-invalid"
   | "conditions-missing"
   | "data-version-missing"
   | "source-missing"
@@ -65,22 +66,43 @@ export const VALIDATION_METRICS: ReadonlyArray<{ key: ValidationMetric; label: s
   { key: "totalImpulseNs", label: "총 충격량", unit: "N·s" },
 ];
 
+export const STANDARD_UNITS = Object.freeze({
+  mass: "kg",
+  pressure: "MPa",
+  thrust: "N",
+  time: "s",
+  length: "mm",
+  impulse: "N·s",
+  specificImpulse: "s",
+} as const);
+
+const validationMetricUnits = Object.fromEntries(VALIDATION_METRICS.map(({ key, unit }) => [key, unit])) as Record<ValidationMetric, string>;
+
+export function isWithinValidationTolerance(difference: number, tolerance: number): boolean {
+  if (!Number.isFinite(difference) || !Number.isFinite(tolerance) || tolerance < 0) return false;
+  const epsilon = Number.EPSILON * Math.max(1, Math.abs(difference), Math.abs(tolerance)) * 2048;
+  return difference <= tolerance + epsilon;
+}
+
 export function compareValidationMetric(metric: ValidationMetric, predicted: number | undefined, measured: number | undefined, tolerance: number | undefined): ValidationComparison {
   if (!Number.isFinite(predicted) || !Number.isFinite(measured)) return { metric, predicted: Number.isFinite(predicted) ? predicted! : null, measured: Number.isFinite(measured) ? measured! : null, absoluteDifference: null, relativeDifferencePercent: null, tolerance: Number.isFinite(tolerance) ? tolerance! : null, status: "unavailable" };
   const absoluteDifference = Math.abs(predicted! - measured!);
   const relativeDifferencePercent = predicted === 0 ? null : (absoluteDifference / Math.abs(predicted!)) * 100;
   const normalizedTolerance = Number.isFinite(tolerance) && tolerance! >= 0 ? tolerance! : null;
-  return { metric, predicted: predicted!, measured: measured!, absoluteDifference, relativeDifferencePercent, tolerance: normalizedTolerance, status: normalizedTolerance === null ? "tolerance-unset" : absoluteDifference <= normalizedTolerance ? "within" : "outside" };
+  return { metric, predicted: predicted!, measured: measured!, absoluteDifference, relativeDifferencePercent, tolerance: normalizedTolerance, status: normalizedTolerance === null ? "tolerance-unset" : isWithinValidationTolerance(absoluteDifference, normalizedTolerance) ? "within" : "outside" };
 }
 
 export function compareValidationRecord(record: ExternalValidationRecord, predicted: Partial<Record<ValidationMetric, number>>): ValidationComparison[] {
-  return VALIDATION_METRICS.map(({ key }) => compareValidationMetric(key, predicted[key], record.measured[key], record.tolerances[key]));
+  return VALIDATION_METRICS.map(({ key }) => record.units?.[key] !== validationMetricUnits[key]
+    ? { metric: key, predicted: null, measured: null, absoluteDifference: null, relativeDifferencePercent: null, tolerance: null, status: "unavailable" as const }
+    : compareValidationMetric(key, predicted[key], record.measured[key], record.tolerances[key]));
 }
 
 export function getValidationQualityWarnings(record: ExternalValidationRecord, currentVersions: ExternalValidationVersions, records: readonly ExternalValidationRecord[] = []): ExternalValidationQualityWarning[] {
   const warnings = new Set<ExternalValidationQualityWarning>();
   for (const { key } of VALIDATION_METRICS) {
     if (!record.units?.[key]) warnings.add("unit-missing");
+    else if (record.units[key] !== validationMetricUnits[key]) warnings.add("unit-invalid");
     if (record.measured?.[key] === undefined) warnings.add("measurement-missing");
     if (record.measured?.[key] !== undefined && record.tolerances?.[key] === undefined) warnings.add("tolerance-missing");
   }
@@ -95,7 +117,8 @@ export function getValidationQualityWarnings(record: ExternalValidationRecord, c
 export function isExternalValidationRecord(value: unknown): value is ExternalValidationRecord {
   if (!value || typeof value !== "object") return false;
   const item = value as Partial<ExternalValidationRecord>;
-  return typeof item.id === "string" && typeof item.name === "string" && typeof item.recordedAt === "string" && typeof item.sourceDescription === "string" && typeof item.calculationResultId === "string" && Boolean(item.measured && typeof item.measured === "object") && Boolean(item.tolerances && typeof item.tolerances === "object") && typeof item.conditionsMemo === "string" && typeof item.dataVersion === "string" && Boolean(item.units && typeof item.units === "object") && typeof item.appVersion === "string" && typeof item.engineVersion === "string" && typeof item.baselineVersion === "string" && typeof item.gsrmReferenceVersion === "string" && typeof item.anCatalogVersion === "string";
+  const finiteRecordValues = (values: unknown) => values && typeof values === "object" && Object.values(values as Record<string, unknown>).every((entry) => typeof entry === "number" && Number.isFinite(entry) && entry >= 0);
+  return typeof item.id === "string" && typeof item.name === "string" && typeof item.recordedAt === "string" && typeof item.sourceDescription === "string" && typeof item.calculationResultId === "string" && Boolean(item.measured && finiteRecordValues(item.measured)) && Boolean(item.tolerances && finiteRecordValues(item.tolerances)) && typeof item.conditionsMemo === "string" && typeof item.dataVersion === "string" && Boolean(item.units && typeof item.units === "object") && typeof item.appVersion === "string" && typeof item.engineVersion === "string" && typeof item.baselineVersion === "string" && typeof item.gsrmReferenceVersion === "string" && typeof item.anCatalogVersion === "string";
 }
 
 export function parseExternalValidationBackup(value: unknown): ExternalValidationRecord[] {

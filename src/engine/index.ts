@@ -59,9 +59,11 @@ export {
   EXTERNAL_VALIDATION_STORAGE_KEY,
   EXTERNAL_VALIDATION_SCHEMA_VERSION,
   VALIDATION_METRICS,
+  STANDARD_UNITS,
   compareValidationMetric,
   compareValidationRecord,
   getValidationQualityWarnings,
+  isWithinValidationTolerance,
   isExternalValidationRecord,
   parseExternalValidationBackup,
 } from "./external-validation";
