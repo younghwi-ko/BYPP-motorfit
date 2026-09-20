@@ -231,6 +231,13 @@ type ExternalValidationBackupFile = {
 };
 
 type SensitivityField = "targetFuelMassKg" | "maximumPressureMpa" | "targetAverageThrustN" | "outerDiameterMm" | "coreDiameterMm" | "segmentLengthMm" | "segmentCount";
+type SensitivityVersions = {
+  appVersion: string;
+  engineVersion: string;
+  baselineVersion: string;
+  gsrmReferenceVersion: string;
+  anCatalogVersion: string;
+};
 type SensitivityScenario = {
   id: string;
   name: string;
@@ -241,6 +248,7 @@ type SensitivityScenario = {
   createdAt: string;
   status: "completed" | "cancelled" | "failed";
   error?: string;
+  versions?: SensitivityVersions;
   result?: {
     input: Record<string, unknown>;
     totalCombinations: number;
@@ -253,6 +261,26 @@ type SensitivityScenario = {
     calculationFailures: number;
   };
 };
+
+const CURRENT_SENSITIVITY_VERSIONS: SensitivityVersions = {
+  appVersion: APP_VERSION,
+  engineVersion: CALCULATION_ENGINE_VERSION,
+  baselineVersion: BASELINE_VERSION,
+  gsrmReferenceVersion: GSRM_REFERENCE_VERSION,
+  anCatalogVersion: AN_CATALOG_VERSION,
+};
+
+function sensitivityVersionMismatch(versions?: SensitivityVersions) {
+  if (!versions) return true;
+  return Object.keys(CURRENT_SENSITIVITY_VERSIONS).some((key) => versions[key as keyof SensitivityVersions] !== CURRENT_SENSITIVITY_VERSIONS[key as keyof SensitivityVersions]);
+}
+
+function isSensitivityScenario(value: unknown): value is SensitivityScenario {
+  if (!value || typeof value !== "object") return false;
+  const item = value as Partial<SensitivityScenario>;
+  const fields: SensitivityField[] = ["targetFuelMassKg", "maximumPressureMpa", "targetAverageThrustN", "outerDiameterMm", "coreDiameterMm", "segmentLengthMm", "segmentCount"];
+  return typeof item.id === "string" && typeof item.name === "string" && fields.includes(item.field as SensitivityField) && typeof item.baseValue === "string" && typeof item.comparisonValue === "string" && typeof item.changeDescription === "string" && typeof item.createdAt === "string" && ["completed", "cancelled", "failed"].includes(item.status ?? "") && (!item.versions || typeof item.versions === "object");
+}
 
 const SENSITIVITY_STORAGE_KEY = "motorfit-sensitivity-v1";
 const SENSITIVITY_BACKUP_SCHEMA_VERSION = 1 as const;
@@ -334,7 +362,7 @@ function printReviewReport(payload: Record<string, any> | null, status: string, 
   ];
   const externalRecords = Array.isArray(payload?.externalValidation) ? payload.externalValidation as ExternalValidationRecord[] : [];
   const sensitivityRecords = Array.isArray(payload?.sensitivityScenarios) ? payload.sensitivityScenarios as SensitivityScenario[] : [];
-  const sensitivityHtml = sensitivityRecords.length ? sensitivityRecords.map((scenario) => `<div class="row"><div class="label">민감도 · ${escapeHtml(scenario.name)}</div><div class="value">${escapeHtml(scenario.changeDescription)} · 상태 ${escapeHtml(scenario.status)}${scenario.result ? ` · 후보 ${escapeHtml(scenario.result.totalCombinations)} · 정밀 ${escapeHtml(scenario.result.evaluatedCombinations)} · 추천 ${escapeHtml(scenario.result.counts.recommend)} · 조건부 ${escapeHtml(scenario.result.counts.conditional)} · 참고 ${escapeHtml(scenario.result.counts.referenceRejected)} · 탈락 ${escapeHtml(scenario.result.counts.rejected)} · 대표 ${escapeHtml(scenario.result.representativeCandidate?.geometry ?? "없음")}` : ""}</div></div>`).join("") : `<p class="small">저장된 민감도 시나리오가 없습니다.</p>`;
+  const sensitivityHtml = sensitivityRecords.length ? sensitivityRecords.map((scenario) => `<div class="row"><div class="label">민감도 · ${escapeHtml(scenario.name)}</div><div class="value">${escapeHtml(scenario.changeDescription)} · 상태 ${escapeHtml(scenario.status)}${sensitivityVersionMismatch(scenario.versions) ? " · 버전 불일치 또는 정보 없음" : ""}${scenario.result ? ` · 후보 ${escapeHtml(scenario.result.totalCombinations)} · 정밀 ${escapeHtml(scenario.result.evaluatedCombinations)} · 추천 ${escapeHtml(scenario.result.counts.recommend)} · 조건부 ${escapeHtml(scenario.result.counts.conditional)} · 참고 ${escapeHtml(scenario.result.counts.referenceRejected)} · 탈락 ${escapeHtml(scenario.result.counts.rejected)} · 대표 ${escapeHtml(scenario.result.representativeCandidate?.geometry ?? "없음")} · GSRM B ${escapeHtml(scenario.result.gsrmB == null ? "미기록" : `${scenario.result.gsrmB} mm`)} · AN ${escapeHtml(`${scenario.result.an.total}개 (${scenario.result.an.recommend}/${scenario.result.an.conditional}/${scenario.result.an.fail})`)}` : ""}</div></div>`).join("") : `<p class="small">저장된 민감도 시나리오가 없습니다.</p>`;
   const predicted = predictedMetricsForReport(candidate);
   const externalHtml = externalRecords.length ? externalRecords.map((record) => {
     const comparisons = compareValidationRecord(record, predicted);
@@ -684,6 +712,16 @@ const requestCancel = () => { cancelRequested.current = true; searchWorker.curre
     const baseValue = sensitivityField === "targetFuelMassKg" ? config.targetFuelMassKg : sensitivityField === "maximumPressureMpa" ? config.maximumPressureMpa : sensitivityField === "targetAverageThrustN" ? (targetThrustText.trim() || "미입력") : sensitivityField === "outerDiameterMm" ? `${config.outerDiameterMm.min}~${config.outerDiameterMm.max}` : sensitivityField === "coreDiameterMm" ? `${config.coreDiameterMm.min}~${config.coreDiameterMm.max}` : sensitivityField === "segmentLengthMm" ? `${config.segmentLengthMm.min}~${config.segmentLengthMm.max}` : `${config.segmentCount.min}~${config.segmentCount.max}`;
     const values = [sensitivityLow.trim(), sensitivityHigh.trim()].filter(Boolean);
     if (!values.length || values.some((value) => !(sensitivityField === "targetAverageThrustN" && ["blank", "미입력"].includes(value.toLowerCase())) && !Number.isFinite(Number(value)))) { setSensitivityNotice("비교값을 하나 이상 입력하세요. 범위나 세그먼트 수는 숫자로 입력해야 합니다. 목표 추력은 blank 또는 미입력을 사용할 수 있습니다."); return; }
+    const numericValues = values.filter((value) => !(sensitivityField === "targetAverageThrustN" && ["blank", "미입력"].includes(value.toLowerCase()))).map(Number);
+    if (numericValues.some((value) => !Number.isFinite(value) || value <= 0)) { setSensitivityNotice("민감도 비교값은 0보다 큰 유한한 숫자여야 합니다."); return; }
+    if (numericValues.length === 2 && numericValues[0] > numericValues[1]) { setSensitivityNotice("낮은 값은 높은 값보다 클 수 없습니다."); return; }
+    const rangeField = ["outerDiameterMm", "coreDiameterMm", "segmentLengthMm"] as const;
+    if (rangeField.includes(sensitivityField as typeof rangeField[number])) {
+      if (mode === "candidate" && numericValues.some((value) => Math.abs(value / (config.manufacturingStepMm ?? 5) - Math.round(value / (config.manufacturingStepMm ?? 5))) > 1e-9)) { setSensitivityNotice("제작 후보 모드의 Do·do·Lo 비교값은 5 mm 배수여야 합니다."); return; }
+    }
+    if (sensitivityField === "segmentCount") {
+      if (numericValues.some((value) => !Number.isInteger(value) || value < 1)) { setSensitivityNotice("세그먼트 수 비교값은 1 이상의 정수여야 합니다."); return; }
+    }
     const nameBase = sensitivityName.trim() || `${sensitivityField} 민감도`;
     setSensitivityRunning(true); setSensitivityNotice(null); cancelRequested.current = false; setProgressPercent(0); setProgressText("민감도 시나리오 준비 중…");
     try {
@@ -695,19 +733,19 @@ const requestCancel = () => { cancelRequested.current = true; searchWorker.curre
         const result = await runSensitivityWorker(scenarioConfig, sensitivityField === "targetAverageThrustN" && blankThrust ? "" : sensitivityField === "targetAverageThrustN" ? valueText : targetThrustText);
         searchWorker.current?.terminate(); searchWorker.current = null;
         const summary = summarizeSensitivityResult(result, scenarioConfig, sensitivityField === "targetAverageThrustN" ? valueText : targetThrustText, mode, automaticMode, gsrmWallThicknessMm);
-        const completedScenario: SensitivityScenario = { id: createSavedCalculationId(), name: `${nameBase} · ${valueText}`, field: sensitivityField, baseValue: String(baseValue), comparisonValue: valueText, changeDescription: `${sensitivityField}: ${baseValue} → ${valueText}`, createdAt: createSavedCalculationTimestamp(), status: "completed", result: summary };
+        const completedScenario: SensitivityScenario = { id: createSavedCalculationId(), name: `${nameBase} · ${valueText}`, field: sensitivityField, baseValue: String(baseValue), comparisonValue: valueText, changeDescription: `${sensitivityField}: ${baseValue} → ${valueText}`, createdAt: createSavedCalculationTimestamp(), status: "completed", versions: CURRENT_SENSITIVITY_VERSIONS, result: summary };
         setSensitivityScenarios((current) => [completedScenario, ...current].slice(0, 20));
       }
       setSensitivityNotice(`${values.length}개 민감도 시나리오 계산이 완료되었습니다. 기준 결과는 변경하지 않았습니다.`);
     } catch (error) {
       const cancelledScenario = error instanceof CandidateSearchCancelledError;
-      const failedScenario: SensitivityScenario = { id: createSavedCalculationId(), name: `${nameBase} · ${cancelledScenario ? "취소" : "실패"}`, field: sensitivityField, baseValue: String(baseValue), comparisonValue: values[0], changeDescription: `${sensitivityField}: ${baseValue} → ${values[0]}`, createdAt: createSavedCalculationTimestamp(), status: cancelledScenario ? "cancelled" : "failed", error: error instanceof Error ? error.message : "민감도 계산 실패" };
+      const failedScenario: SensitivityScenario = { id: createSavedCalculationId(), name: `${nameBase} · ${cancelledScenario ? "취소" : "실패"}`, field: sensitivityField, baseValue: String(baseValue), comparisonValue: values[0], changeDescription: `${sensitivityField}: ${baseValue} → ${values[0]}`, createdAt: createSavedCalculationTimestamp(), status: cancelledScenario ? "cancelled" : "failed", versions: CURRENT_SENSITIVITY_VERSIONS, error: error instanceof Error ? error.message : "민감도 계산 실패" };
       setSensitivityScenarios((current) => [failedScenario, ...current].slice(0, 20));
       setSensitivityNotice(cancelledScenario ? "민감도 계산을 취소했습니다. 기준 결과는 보존됩니다." : "민감도 시나리오 계산에 실패했습니다. 기준 결과는 보존됩니다.");
     } finally { searchWorker.current?.terminate(); searchWorker.current = null; setSensitivityRunning(false); setProgressText(""); setProgressPercent(0); cancelRequested.current = false; }
   };
   const exportSensitivityBackup = () => { const blob = new Blob([JSON.stringify({ app: "MotorFit", schemaVersion: SENSITIVITY_BACKUP_SCHEMA_VERSION, exportedAt: createSavedCalculationTimestamp(), scenarios: sensitivityScenarios }, null, 2)], { type: "application/json" }); const url = URL.createObjectURL(blob); const anchor = document.createElement("a"); anchor.href = url; anchor.download = "motorfit-sensitivity-backup.json"; anchor.click(); URL.revokeObjectURL(url); setSensitivityNotice(`${sensitivityScenarios.length}개 민감도 시나리오를 백업했습니다.`); };
-  const importSensitivityBackup = async (file: File) => { try { const parsed = JSON.parse(await file.text()) as { app?: string; schemaVersion?: number; scenarios?: SensitivityScenario[] }; if (parsed.app !== "MotorFit" || parsed.schemaVersion !== SENSITIVITY_BACKUP_SCHEMA_VERSION || !Array.isArray(parsed.scenarios)) throw new Error("지원하지 않는 민감도 백업입니다."); setSensitivityScenarios((current) => [...parsed.scenarios!.filter((scenario) => typeof scenario?.id === "string" && !current.some((item) => item.id === scenario.id)), ...current].slice(0, 20)); setSensitivityNotice("민감도 시나리오 백업을 복원했습니다."); } catch (error) { setSensitivityNotice(error instanceof Error ? error.message : "민감도 백업을 불러오지 못했습니다."); } finally { if (sensitivityBackupInput.current) sensitivityBackupInput.current.value = ""; } };
+  const importSensitivityBackup = async (file: File) => { try { const parsed = JSON.parse(await file.text()) as { app?: string; schemaVersion?: number; scenarios?: SensitivityScenario[] }; if (parsed.app !== "MotorFit" || parsed.schemaVersion !== SENSITIVITY_BACKUP_SCHEMA_VERSION || !Array.isArray(parsed.scenarios) || parsed.scenarios.some((scenario) => !isSensitivityScenario(scenario))) throw new Error("지원하지 않는 민감도 백업입니다."); const ids = parsed.scenarios.map((scenario) => scenario.id); if (new Set(ids).size !== ids.length) throw new Error("백업 안에 중복된 민감도 시나리오 ID가 있습니다."); const current = sensitivityScenarios; const imported = parsed.scenarios.filter((scenario) => !current.some((item) => item.id === scenario.id)); setSensitivityScenarios([...imported, ...current].slice(0, 20)); const mismatched = imported.some((scenario) => sensitivityVersionMismatch(scenario.versions)); setSensitivityNotice(mismatched ? "민감도 시나리오를 복원했지만 앱·엔진·데이터 버전이 현재와 다릅니다." : "민감도 시나리오 백업을 복원했습니다."); } catch (error) { setSensitivityNotice(error instanceof Error ? error.message : "민감도 백업을 불러오지 못했습니다."); } finally { if (sensitivityBackupInput.current) sensitivityBackupInput.current.value = ""; } };
   const sortedCandidates = useMemo(() => search ? sortCandidates(search.candidates, sortKey, sortDirection) : [], [search, sortDirection, sortKey]);
   const visibleCandidates = useMemo(() => sortedCandidates.filter((candidate) => statusFilters.includes(candidate.status)), [sortedCandidates, statusFilters]);
   const closestFailedCandidate = useMemo(() => {

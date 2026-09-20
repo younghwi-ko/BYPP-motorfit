@@ -148,16 +148,83 @@ test("민감도 비교 what-if 시나리오 저장·내보내기", async ({ page
   await page.getByLabel("민감도 낮은 값").fill("0.35");
   await page.getByLabel("민감도 높은 값").fill("0.45");
   await page.getByRole("button", { name: "시나리오 계산" }).click();
-  await expect(page.getByText("질량 변화 · 0.35", { exact: true })).toBeVisible({ timeout: 60000 });
-  await expect(page.getByText("질량 변화 · 0.45", { exact: true })).toBeVisible({ timeout: 60000 });
+  await expect(page.getByRole("row").filter({ hasText: "질량 변화 · 0.35" })).toBeVisible({ timeout: 60000 });
+  await expect(page.getByRole("row").filter({ hasText: "질량 변화 · 0.45" })).toBeVisible({ timeout: 60000 });
   await expect(page.getByText("what-if 비교이며 전역 최적해·안전·제작 가능 판정을 의미하지 않습니다.")).toBeVisible();
   const download = page.waitForEvent("download"); await page.getByRole("button", { name: "JSON 내보내기" }).click();
   const event = await download; const path = await event.path(); expect(path).toBeTruthy();
   const { readFile } = await import("node:fs/promises"); const payload = JSON.parse(await readFile(path!, "utf8"));
   expect(payload.sensitivityScenarios).toHaveLength(2);
-  const backup = page.waitForEvent("download"); await page.getByRole("button", { name: "민감도 백업" }).click();
+  const backup = page.waitForEvent("download"); await page.getByRole("button", { name: "민감도 백업", exact: true }).click();
   const backupEvent = await backup; expect(backupEvent.suggestedFilename()).toBe("motorfit-sensitivity-backup.json");
   await page.getByRole("button", { name: "삭제", exact: true }).last().click();
+});
+
+test("민감도 비교의 전체 입력 대상과 기준 결과 보존", async ({ page }) => {
+  test.setTimeout(900000);
+  await page.addInitScript(() => localStorage.clear());
+  await page.goto("/");
+  await calculate(page, "0.3956", "4.1", "");
+  await page.getByText("민감도 비교 · what-if 시나리오", { exact: true }).click();
+  const scenarios = [
+    ["질량", "targetFuelMassKg", "0.35", "0.45"],
+    ["압력", "maximumPressureMpa", "3.8", "4.2"],
+    ["추력입력", "targetAverageThrustN", "200", "220"],
+    ["추력공란", "targetAverageThrustN", "blank", "260"],
+    ["Do", "outerDiameterMm", "40", "50"],
+    ["do", "coreDiameterMm", "10", "20"],
+    ["Lo", "segmentLengthMm", "75", "85"],
+    ["세그먼트", "segmentCount", "2", "3"],
+  ] as const;
+  for (const [name, field, low, high] of scenarios) {
+    await page.getByLabel("민감도 변경 대상").selectOption(field);
+    await page.getByLabel("민감도 시나리오 이름").fill(name);
+    await page.getByLabel("민감도 낮은 값").fill(low);
+    await page.getByLabel("민감도 높은 값").fill(high);
+    await page.getByRole("button", { name: "시나리오 계산" }).click();
+    await expect(page.getByRole("row").filter({ hasText: `${name} · ${low}` })).toBeVisible({ timeout: 120000 });
+    await expect(page.getByRole("row").filter({ hasText: `${name} · ${high}` })).toBeVisible({ timeout: 120000 });
+  }
+  await expect(page.getByText(/기준 결과는 변경하지 않았습니다/)).toBeVisible();
+  await expect(page.getByText(/what-if 비교이며 전역 최적해·안전·제작 가능 판정을 의미하지 않습니다/)).toBeVisible();
+  await expect(page.getByText(/GSRM B·AN/)).toBeVisible();
+  await expect(page.getByText(/후보\/정밀\/확장/)).toBeVisible();
+});
+
+test("민감도 입력 규칙과 취소 상태", async ({ page }) => {
+  await page.addInitScript(() => localStorage.clear());
+  await page.goto("/");
+  await calculate(page, "0.3956", "4.1", "");
+  await page.getByText("민감도 비교 · what-if 시나리오", { exact: true }).click();
+  await page.getByLabel("민감도 변경 대상").selectOption("outerDiameterMm");
+  await page.getByLabel("민감도 낮은 값").fill("41");
+  await page.getByLabel("민감도 높은 값").fill("50");
+  await page.getByRole("button", { name: "시나리오 계산" }).click();
+  await expect(page.getByRole("status").filter({ hasText: "5 mm 배수" })).toBeVisible();
+  await page.getByLabel("민감도 낮은 값").fill("50");
+  await page.getByLabel("민감도 높은 값").fill("40");
+  await page.getByRole("button", { name: "시나리오 계산" }).click();
+  await expect(page.getByRole("status").filter({ hasText: "낮은 값은 높은 값보다" })).toBeVisible();
+  await page.getByLabel("민감도 낮은 값").fill("40");
+  await page.getByLabel("민감도 높은 값").fill("50");
+  await page.getByRole("button", { name: "시나리오 계산" }).click();
+  await expect(page.getByRole("button", { name: "민감도 계산 취소" })).toBeVisible({ timeout: 30000 });
+  await page.getByRole("button", { name: "민감도 계산 취소" }).click();
+  await expect(page.getByText("민감도 계산을 취소했습니다. 기준 결과는 보존됩니다.")).toBeVisible({ timeout: 30000 });
+  await expect(page.getByText("질량 기준 계산")).toBeVisible();
+});
+
+test("390px 민감도 비교와 백업 버튼 상호작용", async ({ page }) => {
+  await page.addInitScript(() => localStorage.clear());
+  await page.setViewportSize({ width: 390, height: 844 });
+  await page.goto("/");
+  await calculate(page, "0.3956", "4.1", "");
+  await page.getByText("민감도 비교 · what-if 시나리오", { exact: true }).click();
+  await page.getByLabel("민감도 변경 대상").selectOption("segmentCount");
+  await page.getByLabel("민감도 낮은 값").fill("2");
+  await page.getByLabel("민감도 높은 값").fill("3");
+  await expect(page.getByRole("button", { name: "민감도 백업", exact: true })).toBeVisible();
+  expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true);
 });
 
 test("초보자 사용 설명서와 메인 화면 이동", async ({ page }) => {
