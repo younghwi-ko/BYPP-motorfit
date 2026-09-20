@@ -13,9 +13,11 @@ async function calculate(page: Page, mass: string, pressure: string, thrust: str
     await page.locator("aside input[type=number]").nth(index).fill(value);
   };
   const waitDone = async () => {
-    const massButton = page.getByRole("button", { name: "질량 기준 계산" });
-    try { await expect(massButton).toBeDisabled({ timeout: 5_000 }); } catch { /* very fast calculation */ }
-    await expect(massButton).toBeEnabled({ timeout: 300_000 });
+    // The mass button is not a reliable completion signal for a later stage:
+    // it may remain enabled while the worker is processing pressure/final steps.
+    // Wait for the user-visible completed stage instead of inferring completion
+    // from an unrelated button state.
+    await expect(page.getByText(/단계 3\/3 완료/)).toBeVisible({ timeout: 300_000 });
   };
   await fillVisible("목표 연료 질량 kg", mass);
   await expect(page.locator("aside input[type=number]").nth(0)).toHaveValue(mass);
@@ -23,7 +25,6 @@ async function calculate(page: Page, mass: string, pressure: string, thrust: str
   await fillVisible("목표 평균 추력 N", thrust);
   await page.getByRole("button", { name: "최종 추천 계산" }).click();
   await waitDone();
-  await expect(page.getByText(/UI 단계\s*3\s*\/\s*3/)).toBeVisible({ timeout: 300_000 });
 }
 
 test.describe.configure({ timeout: 360_000 });
@@ -383,15 +384,37 @@ test("계산 결과 이력 JSON 백업·복원과 잘못된 파일 거부", asyn
 
 test("설계 검토 리포트 인쇄와 저장 결과 리포트", async ({ page }) => {
   await page.addInitScript(() => localStorage.clear());
+  const stubPrint = () => { window.print = () => { document.documentElement.setAttribute("data-print-called", "true"); }; };
+  await page.addInitScript(stubPrint);
+  await page.context().addInitScript(stubPrint);
   await page.goto("/");
-  await page.waitForTimeout(1000);
+  await page.waitForTimeout(5000);
   await calculate(page, "0.3956", "4.1", "");
+  const currentReportPopup = page.waitForEvent("popup");
   await page.getByRole("button", { name: /인쇄 \/ PDF로 저장 · 설계 검토 리포트/ }).click();
-  await expect(page.getByRole("button", { name: /인쇄 \/ PDF로 저장 · 설계 검토 리포트/ })).toBeVisible();
+  const currentReport = await currentReportPopup;
+  await expect(currentReport.getByText("MotorFit 설계 검토 리포트", { exact: true })).toBeVisible();
+  await expect(currentReport.getByText(/PDF로 저장/)).toBeVisible();
+  await expect.poll(() => currentReport.locator("html").getAttribute("data-print-called"), { timeout: 5_000 }).toBe("true");
   await page.getByText("계산 결과 이력", { exact: true }).click();
   await page.getByLabel("저장 결과 이름").fill("리포트 저장 결과");
   await page.getByRole("button", { name: "현재 결과 저장" }).click();
   await page.getByLabel("리포트 저장 결과 선택").selectOption({ label: "리포트 저장 결과" });
+  const savedReportPopup = page.waitForEvent("popup");
   await page.getByRole("button", { name: "인쇄 / PDF로 저장" }).last().click();
-  await expect(page.getByRole("button", { name: "인쇄 / PDF로 저장" }).last()).toBeVisible();
+  const savedReport = await savedReportPopup;
+  await expect(savedReport.getByText(/MotorFit 저장 결과 · 리포트 저장 결과/)).toBeVisible();
+  await expect.poll(() => savedReport.locator("html").getAttribute("data-print-called"), { timeout: 5_000 }).toBe("true");
+});
+
+test("인쇄 팝업 차단 시 명확한 오류 안내", async ({ page }) => {
+  const blockPopup = () => { window.open = () => null; };
+  await page.addInitScript(blockPopup);
+  await page.context().addInitScript(blockPopup);
+  await page.goto("/");
+  await page.waitForTimeout(5000);
+  await page.getByRole("button", { name: "기준 설계로 초기화" }).click();
+  await calculate(page, "0.3956", "4.1", "");
+  await page.getByRole("button", { name: /인쇄 \/ PDF로 저장 · 설계 검토 리포트/ }).click();
+  await expect(page.getByRole("status").filter({ hasText: "인쇄용 창이 차단되었습니다" })).toBeVisible();
 });
