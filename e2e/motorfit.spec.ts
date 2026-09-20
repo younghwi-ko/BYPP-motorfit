@@ -138,6 +138,28 @@ test("외부 검증 데이터 저장·비교·백업", async ({ page }) => {
   await expect(page.locator("p.font-bold", { hasText: "시험 기록 A" }).first()).toBeVisible();
 });
 
+test("민감도 비교 what-if 시나리오 저장·내보내기", async ({ page }) => {
+  test.setTimeout(180000);
+  await page.addInitScript(() => localStorage.clear()); await page.goto("/");
+  await calculate(page, "0.3956", "4.1", "");
+  await page.getByText("민감도 비교 · what-if 시나리오", { exact: true }).click();
+  await page.getByLabel("민감도 변경 대상").selectOption("targetFuelMassKg");
+  await page.getByLabel("민감도 시나리오 이름").fill("질량 변화");
+  await page.getByLabel("민감도 낮은 값").fill("0.35");
+  await page.getByLabel("민감도 높은 값").fill("0.45");
+  await page.getByRole("button", { name: "시나리오 계산" }).click();
+  await expect(page.getByText("질량 변화 · 0.35", { exact: true })).toBeVisible({ timeout: 60000 });
+  await expect(page.getByText("질량 변화 · 0.45", { exact: true })).toBeVisible({ timeout: 60000 });
+  await expect(page.getByText("what-if 비교이며 전역 최적해·안전·제작 가능 판정을 의미하지 않습니다.")).toBeVisible();
+  const download = page.waitForEvent("download"); await page.getByRole("button", { name: "JSON 내보내기" }).click();
+  const event = await download; const path = await event.path(); expect(path).toBeTruthy();
+  const { readFile } = await import("node:fs/promises"); const payload = JSON.parse(await readFile(path!, "utf8"));
+  expect(payload.sensitivityScenarios).toHaveLength(2);
+  const backup = page.waitForEvent("download"); await page.getByRole("button", { name: "민감도 백업" }).click();
+  const backupEvent = await backup; expect(backupEvent.suggestedFilename()).toBe("motorfit-sensitivity-backup.json");
+  await page.getByRole("button", { name: "삭제", exact: true }).last().click();
+});
+
 test("초보자 사용 설명서와 메인 화면 이동", async ({ page }) => {
   await page.goto("/guide");
   await expect(page.getByRole("heading", { name: "처음이라면, 이 순서로 보세요." })).toBeVisible();

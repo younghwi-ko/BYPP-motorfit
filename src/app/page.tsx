@@ -230,6 +230,33 @@ type ExternalValidationBackupFile = {
   records: ExternalValidationRecord[];
 };
 
+type SensitivityField = "targetFuelMassKg" | "maximumPressureMpa" | "targetAverageThrustN" | "outerDiameterMm" | "coreDiameterMm" | "segmentLengthMm" | "segmentCount";
+type SensitivityScenario = {
+  id: string;
+  name: string;
+  field: SensitivityField;
+  baseValue: string;
+  comparisonValue: string;
+  changeDescription: string;
+  createdAt: string;
+  status: "completed" | "cancelled" | "failed";
+  error?: string;
+  result?: {
+    input: Record<string, unknown>;
+    totalCombinations: number;
+    evaluatedCombinations: number;
+    automaticExpansionStage: number;
+    counts: { recommend: number; conditional: number; referenceRejected: number; rejected: number };
+    representativeCandidate: Record<string, unknown> | null;
+    gsrmB: number | null;
+    an: { total: number; recommend: number; conditional: number; fail: number };
+    calculationFailures: number;
+  };
+};
+
+const SENSITIVITY_STORAGE_KEY = "motorfit-sensitivity-v1";
+const SENSITIVITY_BACKUP_SCHEMA_VERSION = 1 as const;
+
 const EMPTY_VALIDATION_FORM: Record<ValidationMetric, string> = {
   averageThrustN: "",
   maximumPressureMpa: "",
@@ -251,6 +278,27 @@ function predictedMetricsForReport(candidate: unknown): Partial<Record<Validatio
   if (!candidate || typeof candidate !== "object") return {};
   const item = candidate as Partial<Record<ValidationMetric, number>>;
   return { averageThrustN: item.averageThrustN, maximumPressureMpa: item.maximumPressureMpa, burnTimeSec: item.burnTimeSec, totalImpulseNs: item.totalImpulseNs };
+}
+
+function summarizeSensitivityResult(result: CandidateSearchResult, input: CandidateSearchConfig, targetThrustText: string, mode: "candidate" | "excel", automaticMode: boolean, wallThicknessMm: number): SensitivityScenario["result"] {
+  const representative = result.candidates.find((candidate) => candidate.status !== "fail") ?? result.nearestRejectedCandidate;
+  const anRows = representative ? evaluateAnCatalog(calculateGsrmReferenceDiameter(representative.input.chamberDiameterMm, wallThicknessMm), AN_SERIES_CATALOG) : [];
+  return {
+    input: { ...input, targetThrustText, mode, automaticMode },
+    totalCombinations: result.totalCombinations,
+    evaluatedCombinations: result.evaluatedCombinations,
+    automaticExpansionStage: result.automaticExpansionStage ?? 0,
+    counts: {
+      recommend: result.candidates.filter((candidate) => candidate.status === "pass").length,
+      conditional: result.candidates.filter((candidate) => candidate.status === "conditional").length,
+      referenceRejected: result.nearestRejectedCandidate && !result.candidates.some((candidate) => candidate.status !== "fail") ? 1 : 0,
+      rejected: result.candidates.filter((candidate) => candidate.status === "fail" && candidate !== result.nearestRejectedCandidate).length,
+    },
+    representativeCandidate: representative ? { geometry: `${representative.input.grainOuterDiameterMm}×${representative.input.grainCoreDiameterMm}×${representative.input.segmentLengthMm}/${representative.input.segmentCount}`, massKg: representative.grainMassKg, maximumPressureMpa: representative.maximumPressureMpa, burnTimeSec: representative.burnTimeSec, averageThrustN: representative.averageThrustN, status: representative.status } : null,
+    gsrmB: representative ? calculateGsrmReferenceDiameter(representative.input.chamberDiameterMm, wallThicknessMm) : null,
+    an: { total: anRows.length || 241, recommend: anRows.filter((row) => row.calculation.check.status === "recommend").length, conditional: anRows.filter((row) => row.calculation.check.status === "conditional").length, fail: anRows.filter((row) => row.calculation.check.status === "fail").length },
+    calculationFailures: result.calculationFailures,
+  };
 }
 
 const SAVED_RESULTS_KEY = "motorfit-calculation-history-v1";
@@ -285,6 +333,8 @@ function printReviewReport(payload: Record<string, any> | null, status: string, 
     ["생성 시각", new Date().toLocaleString("ko-KR")], ["계산 상태", reportStatus], ["목표 질량", `${input.targetFuelMassKg ?? "미기록"} kg`], ["최대 허용 압력", `${input.maximumPressureMpa ?? "미기록"} MPa`], ["목표 평균 추력", input.targetThrustEnabled ? `${input.targetThrustText ?? "미기록"} N` : "미입력"], ["질량 허용 오차", input.fuelMassToleranceDisplay ?? `${input.fuelMassToleranceKg ?? "미기록"} kg`], ["탐색 모드", metadata.searchMode ?? "미기록"], ["자동 확장 단계", search.automaticExpansionStage ?? metadata.automaticExpansionStage ?? "미기록"], ["전체 후보 수", search.totalCombinations ?? metadata.totalCombinations ?? "미기록"], ["정밀 계산 수", search.evaluatedCombinations ?? metadata.evaluatedCombinations ?? "미기록"], ["계산 실패 수", metadata.calculationFailures ?? "미기록"], ["추천·조건부·참고·탈락", `${counts.recommend ?? 0} · ${counts.conditional ?? 0} · ${counts.referenceRejected ?? 0} · ${counts.rejected ?? 0}`], ["대표 후보", candidate?.geometry ?? "없음"], ["대표 후보 질량", candidate?.massKg == null ? "미기록" : `${candidate.massKg} kg`], ["대표 후보 최대 압력", candidate?.maximumPressureMpa == null ? "미기록" : `${candidate.maximumPressureMpa} MPa`], ["대표 후보 연소시간", candidate?.burnTimeSec == null ? "미기록" : `${candidate.burnTimeSec} s`], ["대표 후보 평균 추력", candidate?.averageThrustN == null ? "미기록" : `${candidate.averageThrustN} N`], ["GSRM B", payload?.gsrm?.referenceDiameterMm == null ? "미기록" : `${payload.gsrm.referenceDiameterMm} mm`], ["AN 검사", payload?.an?.catalogSize ?? 241], ["AN 판정", `${payload?.an?.recommend ?? 0} · ${payload?.an?.conditional ?? 0} · ${payload?.an?.fail ?? 0}`], ["엔진·앱 버전", `${metadata.engineVersion ?? "미기록"} · ${metadata.appVersion ?? "미기록"}`], ["기준 데이터 버전", `${metadata.baselineVersion ?? "미기록"} · ${metadata.gsrmReferenceVersion ?? "미기록"} · ${metadata.anCatalogVersion ?? "미기록"}`], ["검산 상태", payload?.validation?.summary ?? "현재 결과에 대한 별도 fixture 재검산: 실행하지 않음"],
   ];
   const externalRecords = Array.isArray(payload?.externalValidation) ? payload.externalValidation as ExternalValidationRecord[] : [];
+  const sensitivityRecords = Array.isArray(payload?.sensitivityScenarios) ? payload.sensitivityScenarios as SensitivityScenario[] : [];
+  const sensitivityHtml = sensitivityRecords.length ? sensitivityRecords.map((scenario) => `<div class="row"><div class="label">민감도 · ${escapeHtml(scenario.name)}</div><div class="value">${escapeHtml(scenario.changeDescription)} · 상태 ${escapeHtml(scenario.status)}${scenario.result ? ` · 후보 ${escapeHtml(scenario.result.totalCombinations)} · 정밀 ${escapeHtml(scenario.result.evaluatedCombinations)} · 추천 ${escapeHtml(scenario.result.counts.recommend)} · 조건부 ${escapeHtml(scenario.result.counts.conditional)} · 참고 ${escapeHtml(scenario.result.counts.referenceRejected)} · 탈락 ${escapeHtml(scenario.result.counts.rejected)} · 대표 ${escapeHtml(scenario.result.representativeCandidate?.geometry ?? "없음")}` : ""}</div></div>`).join("") : `<p class="small">저장된 민감도 시나리오가 없습니다.</p>`;
   const predicted = predictedMetricsForReport(candidate);
   const externalHtml = externalRecords.length ? externalRecords.map((record) => {
     const comparisons = compareValidationRecord(record, predicted);
@@ -293,7 +343,7 @@ function printReviewReport(payload: Record<string, any> | null, status: string, 
   }).join("") : `<p class="small">연결된 외부 검증 데이터가 없습니다.</p>`;
   rows.push(["모델 검증 수준", payload?.modelValidationLevel ?? MODEL_VALIDATION_LEVEL], ["기준 모델 재현", payload?.baselineReproductionStatus ?? BASELINE_REPRODUCTION_STATUS], ["계산 재현성", payload?.deterministicCalculationStatus ?? DETERMINISTIC_CALCULATION_STATUS], ["하드웨어 시험 검증", payload?.hardwareValidationStatus ?? HARDWARE_VALIDATION_STATUS], ["제작 승인", payload?.productionApprovalStatus ?? PRODUCTION_APPROVAL_STATUS], ["시험 데이터 등록", payload?.validationDataAvailable ? "있음" : "없음"], ["모델 가정", (payload?.assumptions ?? MODEL_ASSUMPTIONS).join(" / ")], ["모델 한계", (payload?.limitations ?? MODEL_LIMITATIONS).join(" / ")]);
   const reasons = candidate?.reasons ?? [];
-  const report = `<!doctype html><html lang="ko"><head><meta charset="utf-8"><title>${escapeHtml(title)}</title><style>@page{size:A4;margin:16mm}*{box-sizing:border-box}body{font-family:Arial,"Malgun Gothic",sans-serif;color:#172033;line-height:1.5;font-size:11pt}h1{font-size:22pt;margin:0 0 4pt}h2{font-size:14pt;border-bottom:2px solid #0e7490;padding-bottom:4pt;margin-top:18pt}p{margin:5pt 0}.meta{color:#475569;font-size:9pt}.notice{background:#fff7ed;border:1px solid #fdba74;padding:8pt;border-radius:6pt}.grid{display:grid;grid-template-columns:1fr 1fr;gap:5pt 16pt}.row{border-bottom:1px solid #e2e8f0;padding:4pt 0;break-inside:avoid}.label{color:#64748b;font-size:9pt}.value{font-weight:700}.candidate{border:2px solid #0e7490;padding:9pt;border-radius:7pt}.status{font-weight:700}.small{font-size:9pt;color:#475569}@media print{button{display:none}h2{break-after:avoid}.grid{break-inside:avoid}}</style></head><body><h1>${escapeHtml(title)}</h1><p class="meta">프로젝트: BYPP MotorFit · 보고서 생성 시각: ${escapeHtml(new Date().toLocaleString("ko-KR"))}</p><div class="notice"><b>제한:</b> 자동 탐색은 전역 최적해를 보장하지 않습니다. 본 결과는 교육·설계 검토용이며 실제 제작·점화 승인용이 아닙니다.</div><h2>계산 요약</h2><div class="grid">${rows.map(([label, value]) => `<div class="row"><div class="label">${escapeHtml(label)}</div><div class="value">${escapeHtml(value)}</div></div>`).join("")}</div><h2>대표 후보 판정</h2><div class="candidate"><p><b>상태:</b> <span class="status">${escapeHtml(candidate?.status ?? "선택 후보 없음")}</span></p><p><b>형상:</b> ${escapeHtml(candidate?.geometry ?? "없음")}</p><p><b>판정 이유:</b> ${escapeHtml(reasons.join(" ") || "기록된 실패 사유 없음")}</p><p class="small">목표 추력이 미입력인 경우 MSE·최대 편차·추력 변동성·추력 점수는 계산하지 않습니다.</p></div><h2>GSRM·AN 요약</h2><p>GSRM B 변환값과 AN 카탈로그 판정은 저장된 계산 결과의 metadata를 사용했습니다. ${escapeHtml(payload?.gsrm?.note ?? "AN 검사가 실행되지 않았거나 저장되지 않았습니다.")}</p><p>AN 검사 수: ${escapeHtml(payload?.an?.catalogSize ?? 241)}개 · 추천 ${escapeHtml(payload?.an?.recommend ?? 0)}개 · 조건부 ${escapeHtml(payload?.an?.conditional ?? 0)}개 · 탈락 ${escapeHtml(payload?.an?.fail ?? 0)}개</p><h2>외부 검증 데이터 비교</h2><div class="grid">${externalHtml}</div><p class="small">측정값과 계산값의 차이는 모델·입력·측정 조건의 차이를 포함할 수 있으며, 단일 측정은 일반적 신뢰성을 증명하지 않습니다. 데이터 품질과 출처는 사용자가 확인해야 합니다. 비교는 설계 검토용이며 제작·점화 승인이나 안전 판정이 아닙니다.</p><h2>재현 정보</h2><p class="small">앱 ${escapeHtml(metadata.appVersion)} · 엔진 ${escapeHtml(metadata.engineVersion)} · SRM ${escapeHtml(metadata.baselineVersion)} · GSRM ${escapeHtml(metadata.gsrmReferenceVersion)} · AN ${escapeHtml(metadata.anCatalogVersion)}</p><p class="small">검산 상태: ${escapeHtml(payload?.validation?.summary ?? "검산하지 않음")}</p><button onclick="window.print()">인쇄 / PDF로 저장</button></body></html>`;
+  const report = `<!doctype html><html lang="ko"><head><meta charset="utf-8"><title>${escapeHtml(title)}</title><style>@page{size:A4;margin:16mm}*{box-sizing:border-box}body{font-family:Arial,"Malgun Gothic",sans-serif;color:#172033;line-height:1.5;font-size:11pt}h1{font-size:22pt;margin:0 0 4pt}h2{font-size:14pt;border-bottom:2px solid #0e7490;padding-bottom:4pt;margin-top:18pt}p{margin:5pt 0}.meta{color:#475569;font-size:9pt}.notice{background:#fff7ed;border:1px solid #fdba74;padding:8pt;border-radius:6pt}.grid{display:grid;grid-template-columns:1fr 1fr;gap:5pt 16pt}.row{border-bottom:1px solid #e2e8f0;padding:4pt 0;break-inside:avoid}.label{color:#64748b;font-size:9pt}.value{font-weight:700}.candidate{border:2px solid #0e7490;padding:9pt;border-radius:7pt}.status{font-weight:700}.small{font-size:9pt;color:#475569}@media print{button{display:none}h2{break-after:avoid}.grid{break-inside:avoid}}</style></head><body><h1>${escapeHtml(title)}</h1><p class="meta">프로젝트: BYPP MotorFit · 보고서 생성 시각: ${escapeHtml(new Date().toLocaleString("ko-KR"))}</p><div class="notice"><b>제한:</b> 자동 탐색은 전역 최적해를 보장하지 않습니다. 본 결과는 교육·설계 검토용이며 실제 제작·점화 승인용이 아닙니다. 민감도 결과는 what-if 비교일 뿐 안전·제작 가능 판정이 아닙니다.</div><h2>계산 요약</h2><div class="grid">${rows.map(([label, value]) => `<div class="row"><div class="label">${escapeHtml(label)}</div><div class="value">${escapeHtml(value)}</div></div>`).join("")}</div><h2>대표 후보 판정</h2><div class="candidate"><p><b>상태:</b> <span class="status">${escapeHtml(candidate?.status ?? "선택 후보 없음")}</span></p><p><b>형상:</b> ${escapeHtml(candidate?.geometry ?? "없음")}</p><p><b>판정 이유:</b> ${escapeHtml(reasons.join(" ") || "기록된 실패 사유 없음")}</p><p class="small">목표 추력이 미입력인 경우 MSE·최대 편차·추력 변동성·추력 점수는 계산하지 않습니다.</p></div><h2>GSRM·AN 요약</h2><p>GSRM B 변환값과 AN 카탈로그 판정은 저장된 계산 결과의 metadata를 사용했습니다. ${escapeHtml(payload?.gsrm?.note ?? "AN 검사가 실행되지 않았거나 저장되지 않았습니다.")}</p><p>AN 검사 수: ${escapeHtml(payload?.an?.catalogSize ?? 241)}개 · 추천 ${escapeHtml(payload?.an?.recommend ?? 0)}개 · 조건부 ${escapeHtml(payload?.an?.conditional ?? 0)}개 · 탈락 ${escapeHtml(payload?.an?.fail ?? 0)}개</p><h2>민감도 비교</h2><div class="grid">${sensitivityHtml}</div><h2>외부 검증 데이터 비교</h2><div class="grid">${externalHtml}</div><p class="small">측정값과 계산값의 차이는 모델·입력·측정 조건의 차이를 포함할 수 있으며, 단일 측정은 일반적 신뢰성을 증명하지 않습니다. 데이터 품질과 출처는 사용자가 확인해야 합니다. 비교는 설계 검토용이며 제작·점화 승인이나 안전 판정이 아닙니다.</p><h2>재현 정보</h2><p class="small">앱 ${escapeHtml(metadata.appVersion)} · 엔진 ${escapeHtml(metadata.engineVersion)} · SRM ${escapeHtml(metadata.baselineVersion)} · GSRM ${escapeHtml(metadata.gsrmReferenceVersion)} · AN ${escapeHtml(metadata.anCatalogVersion)}</p><p class="small">검산 상태: ${escapeHtml(payload?.validation?.summary ?? "검산하지 않음")}</p><button onclick="window.print()">인쇄 / PDF로 저장</button></body></html>`;
   const reportWindow = window.open("", "_blank", "width=900,height=700");
   if (!reportWindow) return;
   reportWindow.document.write(report);
@@ -430,6 +480,14 @@ export default function Home() {
   const [validationMeasured, setValidationMeasured] = useState<Record<ValidationMetric, string>>(EMPTY_VALIDATION_FORM);
   const [validationTolerances, setValidationTolerances] = useState<Record<ValidationMetric, string>>(EMPTY_VALIDATION_FORM);
   const [editingValidationId, setEditingValidationId] = useState<string | null>(null);
+  const [sensitivityScenarios, setSensitivityScenarios] = useState<SensitivityScenario[]>([]);
+  const [sensitivityField, setSensitivityField] = useState<SensitivityField>("targetFuelMassKg");
+  const [sensitivityLow, setSensitivityLow] = useState("");
+  const [sensitivityHigh, setSensitivityHigh] = useState("");
+  const [sensitivityName, setSensitivityName] = useState("");
+  const [sensitivityRunning, setSensitivityRunning] = useState(false);
+  const [sensitivityNotice, setSensitivityNotice] = useState<string | null>(null);
+  const sensitivityBackupInput = useRef<HTMLInputElement | null>(null);
   const validationBackupInput = useRef<HTMLInputElement | null>(null);
   const backupFileInput = useRef<HTMLInputElement | null>(null);
 const cancelRequested = useRef(false);
@@ -488,6 +546,17 @@ const requestCancel = () => { cancelRequested.current = true; searchWorker.curre
   useEffect(() => {
     try { window.localStorage.setItem("motorfit-input-v1", JSON.stringify({ config, targetThrustText, mode, automaticMode, calculatedSignature })); } catch { /* storage is best effort */ }
   }, [automaticMode, calculatedSignature, config, mode, targetThrustText]);
+  useEffect(() => {
+    try {
+      const raw = window.localStorage.getItem(SENSITIVITY_STORAGE_KEY);
+      if (!raw) return;
+      const parsed = JSON.parse(raw);
+      if (Array.isArray(parsed)) window.setTimeout(() => setSensitivityScenarios(parsed.slice(0, 20)), 0);
+    } catch { window.setTimeout(() => setSensitivityNotice("민감도 비교 기록을 복원하지 못했습니다. 현재 계산 결과에는 영향을 주지 않습니다."), 0); }
+  }, []);
+  useEffect(() => {
+    try { window.localStorage.setItem(SENSITIVITY_STORAGE_KEY, JSON.stringify(sensitivityScenarios.slice(0, 20))); } catch { window.setTimeout(() => setSensitivityNotice("민감도 비교 저장 공간에 접근할 수 없습니다."), 0); }
+  }, [sensitivityScenarios]);
 
   const updateNumber = (key: keyof CandidateSearchConfig, value: number) => setConfig((current) => ({ ...current, [key]: value }));
   const updateRange = (key: "outerDiameterMm" | "coreDiameterMm" | "segmentLengthMm", bound: "min" | "max", value: number) => setConfig((current) => ({ ...current, [key]: { ...current[key], [bound]: value } }));
@@ -582,6 +651,63 @@ const requestCancel = () => { cancelRequested.current = true; searchWorker.curre
       setProgressPercent(0);
     }
   };
+  const runSensitivityWorker = (scenarioConfig: CandidateSearchConfig, scenarioTargetThrustText: string): Promise<CandidateSearchResult> => new Promise((resolve, reject) => {
+    const targetEnabled = scenarioTargetThrustText.trim() !== "";
+    const workerConfig: CandidateSearchConfig = { ...scenarioConfig, targetAverageThrustN: targetEnabled ? Number(scenarioTargetThrustText) : scenarioConfig.targetAverageThrustN, targetThrustEnabled: targetEnabled, mode, burnTimeFilterEnabled: automaticMode ? false : scenarioConfig.burnTimeFilterEnabled };
+    const worker = new Worker(new URL("../engine/search-worker.ts", import.meta.url), { type: "module" });
+    searchWorker.current = worker;
+    let streamedCandidates: CandidateResult[] = [];
+    let streamedSummary: Omit<CandidateSearchResult, "candidates" | "passedCandidates" | "nearestRejectedCandidate"> | null = null;
+    let streamedPassedIndices: number[] = [];
+    let streamedNearestRejectedIndex = -1;
+    worker.onmessage = (event: MessageEvent<{ type: string; candidate?: CandidateResult; summary?: Omit<CandidateSearchResult, "candidates" | "passedCandidates" | "nearestRejectedCandidate">; passedIndices?: number[]; nearestRejectedIndex?: number; completed?: number; total?: number; totalCandidates?: number; plannedPrecision?: number; issues?: readonly string[]; message?: string }>) => {
+      if (event.data.type === "prepared") setProgressText(`민감도 시나리오 · 0 / ${(event.data.plannedPrecision ?? 0).toLocaleString()}개 정밀 계산`);
+      if (event.data.type === "progress") { const completed = event.data.completed ?? 0; const total = event.data.total ?? 0; setProgressText(`민감도 시나리오 · ${completed.toLocaleString()} / ${total.toLocaleString()}개 정밀 계산`); setProgressPercent(total === 0 ? 100 : (completed / total) * 100); }
+      else if (event.data.type === "result-start" && event.data.summary) { streamedSummary = event.data.summary; streamedPassedIndices = event.data.passedIndices ?? []; streamedNearestRejectedIndex = event.data.nearestRejectedIndex ?? -1; streamedCandidates = []; }
+      else if (event.data.type === "candidate" && event.data.candidate) streamedCandidates.push(event.data.candidate);
+      else if (event.data.type === "result-end" && streamedSummary) resolve({ ...streamedSummary, candidates: streamedCandidates, passedCandidates: streamedPassedIndices.map((index) => streamedCandidates[index]).filter(Boolean), nearestRejectedCandidate: streamedNearestRejectedIndex >= 0 ? streamedCandidates[streamedNearestRejectedIndex] : undefined });
+      else if (event.data.type === "cancelled") reject(new CandidateSearchCancelledError());
+      else if (event.data.type === "input-error") reject(new CandidateSearchInputError(event.data.issues ?? ["입력을 확인하세요."]));
+      else if (event.data.type === "error") reject(new Error(event.data.message ?? "민감도 시나리오 계산 오류"));
+    };
+    worker.onerror = () => reject(new Error("민감도 시나리오 Worker 실행 중 오류가 발생했습니다."));
+    worker.postMessage({ type: "run", config: workerConfig, mode, automaticMode, batchSize: 10 });
+  });
+  const sensitivityOverrides = (field: SensitivityField, value: number, base: CandidateSearchConfig): CandidateSearchConfig => {
+    if (field === "targetFuelMassKg" || field === "maximumPressureMpa" || field === "targetAverageThrustN") return { ...base, [field]: value };
+    if (field === "segmentCount") return { ...base, segmentCount: { min: Math.round(value), max: Math.round(value) } };
+    const rangeKey = field as "outerDiameterMm" | "coreDiameterMm" | "segmentLengthMm";
+    return { ...base, [rangeKey]: { ...base[rangeKey], min: value, max: value } };
+  };
+  const addSensitivityScenario = async () => {
+    if (!search || sensitivityRunning) { setSensitivityNotice("기준 계산을 먼저 완료하고 시나리오를 추가하세요."); return; }
+    const baseValue = sensitivityField === "targetFuelMassKg" ? config.targetFuelMassKg : sensitivityField === "maximumPressureMpa" ? config.maximumPressureMpa : sensitivityField === "targetAverageThrustN" ? (targetThrustText.trim() || "미입력") : sensitivityField === "outerDiameterMm" ? `${config.outerDiameterMm.min}~${config.outerDiameterMm.max}` : sensitivityField === "coreDiameterMm" ? `${config.coreDiameterMm.min}~${config.coreDiameterMm.max}` : sensitivityField === "segmentLengthMm" ? `${config.segmentLengthMm.min}~${config.segmentLengthMm.max}` : `${config.segmentCount.min}~${config.segmentCount.max}`;
+    const values = [sensitivityLow.trim(), sensitivityHigh.trim()].filter(Boolean);
+    if (!values.length || values.some((value) => !(sensitivityField === "targetAverageThrustN" && ["blank", "미입력"].includes(value.toLowerCase())) && !Number.isFinite(Number(value)))) { setSensitivityNotice("비교값을 하나 이상 입력하세요. 범위나 세그먼트 수는 숫자로 입력해야 합니다. 목표 추력은 blank 또는 미입력을 사용할 수 있습니다."); return; }
+    const nameBase = sensitivityName.trim() || `${sensitivityField} 민감도`;
+    setSensitivityRunning(true); setSensitivityNotice(null); cancelRequested.current = false; setProgressPercent(0); setProgressText("민감도 시나리오 준비 중…");
+    try {
+      for (const valueText of values) {
+        if (cancelRequested.current) throw new CandidateSearchCancelledError();
+        const blankThrust = sensitivityField === "targetAverageThrustN" && ["blank", "미입력"].includes(valueText.toLowerCase());
+        const value = blankThrust ? config.targetAverageThrustN : Number(valueText);
+        const scenarioConfig = sensitivityOverrides(sensitivityField, value, config);
+        const result = await runSensitivityWorker(scenarioConfig, sensitivityField === "targetAverageThrustN" && blankThrust ? "" : sensitivityField === "targetAverageThrustN" ? valueText : targetThrustText);
+        searchWorker.current?.terminate(); searchWorker.current = null;
+        const summary = summarizeSensitivityResult(result, scenarioConfig, sensitivityField === "targetAverageThrustN" ? valueText : targetThrustText, mode, automaticMode, gsrmWallThicknessMm);
+        const completedScenario: SensitivityScenario = { id: createSavedCalculationId(), name: `${nameBase} · ${valueText}`, field: sensitivityField, baseValue: String(baseValue), comparisonValue: valueText, changeDescription: `${sensitivityField}: ${baseValue} → ${valueText}`, createdAt: createSavedCalculationTimestamp(), status: "completed", result: summary };
+        setSensitivityScenarios((current) => [completedScenario, ...current].slice(0, 20));
+      }
+      setSensitivityNotice(`${values.length}개 민감도 시나리오 계산이 완료되었습니다. 기준 결과는 변경하지 않았습니다.`);
+    } catch (error) {
+      const cancelledScenario = error instanceof CandidateSearchCancelledError;
+      const failedScenario: SensitivityScenario = { id: createSavedCalculationId(), name: `${nameBase} · ${cancelledScenario ? "취소" : "실패"}`, field: sensitivityField, baseValue: String(baseValue), comparisonValue: values[0], changeDescription: `${sensitivityField}: ${baseValue} → ${values[0]}`, createdAt: createSavedCalculationTimestamp(), status: cancelledScenario ? "cancelled" : "failed", error: error instanceof Error ? error.message : "민감도 계산 실패" };
+      setSensitivityScenarios((current) => [failedScenario, ...current].slice(0, 20));
+      setSensitivityNotice(cancelledScenario ? "민감도 계산을 취소했습니다. 기준 결과는 보존됩니다." : "민감도 시나리오 계산에 실패했습니다. 기준 결과는 보존됩니다.");
+    } finally { searchWorker.current?.terminate(); searchWorker.current = null; setSensitivityRunning(false); setProgressText(""); setProgressPercent(0); cancelRequested.current = false; }
+  };
+  const exportSensitivityBackup = () => { const blob = new Blob([JSON.stringify({ app: "MotorFit", schemaVersion: SENSITIVITY_BACKUP_SCHEMA_VERSION, exportedAt: createSavedCalculationTimestamp(), scenarios: sensitivityScenarios }, null, 2)], { type: "application/json" }); const url = URL.createObjectURL(blob); const anchor = document.createElement("a"); anchor.href = url; anchor.download = "motorfit-sensitivity-backup.json"; anchor.click(); URL.revokeObjectURL(url); setSensitivityNotice(`${sensitivityScenarios.length}개 민감도 시나리오를 백업했습니다.`); };
+  const importSensitivityBackup = async (file: File) => { try { const parsed = JSON.parse(await file.text()) as { app?: string; schemaVersion?: number; scenarios?: SensitivityScenario[] }; if (parsed.app !== "MotorFit" || parsed.schemaVersion !== SENSITIVITY_BACKUP_SCHEMA_VERSION || !Array.isArray(parsed.scenarios)) throw new Error("지원하지 않는 민감도 백업입니다."); setSensitivityScenarios((current) => [...parsed.scenarios!.filter((scenario) => typeof scenario?.id === "string" && !current.some((item) => item.id === scenario.id)), ...current].slice(0, 20)); setSensitivityNotice("민감도 시나리오 백업을 복원했습니다."); } catch (error) { setSensitivityNotice(error instanceof Error ? error.message : "민감도 백업을 불러오지 못했습니다."); } finally { if (sensitivityBackupInput.current) sensitivityBackupInput.current.value = ""; } };
   const sortedCandidates = useMemo(() => search ? sortCandidates(search.candidates, sortKey, sortDirection) : [], [search, sortDirection, sortKey]);
   const visibleCandidates = useMemo(() => sortedCandidates.filter((candidate) => statusFilters.includes(candidate.status)), [sortedCandidates, statusFilters]);
   const closestFailedCandidate = useMemo(() => {
@@ -645,9 +771,8 @@ const requestCancel = () => { cancelRequested.current = true; searchWorker.curre
     if (!search) return null;
     const rows = search.candidates.map((candidate) => ({ status: candidate.status, geometry: `${candidate.input.grainOuterDiameterMm}×${candidate.input.grainCoreDiameterMm}×${candidate.input.segmentLengthMm}/${candidate.input.segmentCount}`, massKg: candidate.grainMassKg, maximumPressureMpa: candidate.maximumPressureMpa, burnTimeSec: candidate.burnTimeSec, averageThrustN: candidate.averageThrustN, totalImpulseNs: candidate.totalImpulseNs, reasons: candidate.reasons.join(" ") }));
     const representative = selected ?? referenceCandidate;
-    const metadata = search.metadata ?? { appVersion: "0.1.0", engineVersion: "candidate-search-1", calculatedAt: new Date().toISOString(), input: { ...config }, fuelMassToleranceKg: config.fuelMassToleranceKg, searchMode: mode, automaticExpansionStage: search.automaticExpansionStage, totalCombinations: search.totalCombinations, evaluatedCombinations: search.evaluatedCombinations, calculationFailures: search.calculationFailures, counts: { recommend: candidateCounts.pass, conditional: candidateCounts.conditional, referenceRejected: referenceCandidate ? 1 : 0, rejected: candidateCounts.fail }, baselineVersion: "SRM_2023.xls-baseline", gsrmReferenceVersion: "GSRM-engineering-targets-v1", anCatalogVersion: "AS568A-supplied-catalog", anCatalogItemCount: 241, status: "completed" as const };
+    const metadata = { ...(search.metadata ?? { appVersion: "0.1.0", engineVersion: "candidate-search-1", calculatedAt: new Date().toISOString(), input: { ...config }, fuelMassToleranceKg: config.fuelMassToleranceKg, searchMode: mode, automaticExpansionStage: search.automaticExpansionStage, totalCombinations: search.totalCombinations, evaluatedCombinations: search.evaluatedCombinations, calculationFailures: search.calculationFailures, counts: { recommend: candidateCounts.pass, conditional: candidateCounts.conditional, referenceRejected: referenceCandidate ? 1 : 0, rejected: candidateCounts.fail }, baselineVersion: "SRM_2023.xls-baseline", gsrmReferenceVersion: "GSRM-engineering-targets-v1", anCatalogVersion: "AS568A-supplied-catalog", anCatalogItemCount: 241, status: "completed" as const }), units: STANDARD_UNITS };
     const validation = { calculationStatus: lastCalculationStatus === "completed" ? "COMPLETED" : lastCalculationStatus.toUpperCase(), baselineStatus: "PASS", liveFixtureStatus: "NOT_RUN", status: "NOT_RUN" as const, summary: "현재 결과에 대한 별도 fixture 재검산: 실행하지 않음", fixtures: VALIDATION_FIXTURES.map(notRunValidation) };
-    metadata.units = STANDARD_UNITS;
     return { metadata, modelValidationLevel: MODEL_VALIDATION_LEVEL, baselineReproductionStatus: BASELINE_REPRODUCTION_STATUS, deterministicCalculationStatus: DETERMINISTIC_CALCULATION_STATUS, hardwareValidationStatus: HARDWARE_VALIDATION_STATUS, productionApprovalStatus: PRODUCTION_APPROVAL_STATUS, assumptions: MODEL_ASSUMPTIONS, limitations: MODEL_LIMITATIONS, validationDataAvailable: VALIDATION_DATA_AVAILABLE, exportedAt: new Date().toISOString(), input: { ...config, fuelMassToleranceDisplay: formatMassTolerance(config.fuelMassToleranceKg), targetThrustText, targetThrustEnabled: targetThrustText.trim() !== "" }, search: { totalCombinations: search.totalCombinations, evaluatedCombinations: search.evaluatedCombinations, automaticExpansionStage: search.automaticExpansionStage ?? 0, searchEnvelope: search.searchEnvelope, warning: search.warning, diagnosis: search.diagnosis, counts: { recommend: candidateCounts.pass, conditional: candidateCounts.conditional, referenceRejected: referenceCandidate ? 1 : 0, rejected: candidateCounts.fail } }, candidates: rows, representativeCandidate: representative ? rows[search.candidates.indexOf(representative)] : null, selectedCandidates: comparison.map((candidate) => rows[search.candidates.indexOf(candidate)]), referenceCandidate: referenceCandidate ? rows[search.candidates.indexOf(referenceCandidate)] : null, referenceRule: "추천·조건부 후보가 없을 때만 목표 질량에 가장 가까운 탈락 후보 1개를 참고용으로 표시", externalValidation: externalValidationRecords.filter((record) => record.calculationResultId === "current"), gsrm: selected ? { referenceDiameterMm: gsrmReferenceDiameterMm, note: "선택 후보의 GSRM B 변환값. AN 검사는 화면에서 실행한 결과를 기준으로 합니다." } : null, an: anExportState ? { catalogSize: anExportState.total, query: anExportState.query, page: anExportState.page, pageCount: anExportState.pageCount, recommend: anExportState.recommend, conditional: anExportState.conditional, fail: anExportState.fail } : { catalogSize: 241, query: "미실행", page: 0, pageCount: 0, recommend: 0, conditional: 0, fail: 0 }, validation };
   };
   const hasCurrentValidation = externalValidationRecords.some((record) => record.calculationResultId === "current");
@@ -663,6 +788,7 @@ const requestCancel = () => { cancelRequested.current = true; searchWorker.curre
     if (!payload) return;
     const rows = payload.candidates ?? [];
     const externalValidationComparisons = (payload.externalValidation ?? []).flatMap((record: ExternalValidationRecord) => compareValidationRecord(record, predictedMetricsForReport(payload.representativeCandidate)));
+    const sensitivityExport = savedPayload?.sensitivityScenarios ?? sensitivityScenarios;
     const externalValidationQualityWarnings = (payload.externalValidation ?? []).map((record: ExternalValidationRecord) => ({ id: record.id, warnings: getValidationQualityWarnings(record, currentValidationVersions, payload.externalValidation as ExternalValidationRecord[]) }));
     const csvValue = (value: unknown) => JSON.stringify(value ?? "");
     const csvLines = [
@@ -682,6 +808,7 @@ const requestCancel = () => { cancelRequested.current = true; searchWorker.curre
       `externalValidation,${csvValue(payload.externalValidation ?? [])}`,
       `externalValidationComparisons,${csvValue(externalValidationComparisons)}`,
       `externalValidationQualityWarnings,${csvValue(externalValidationQualityWarnings)}`,
+      `sensitivityScenarios,${csvValue(sensitivityExport)}`,
       `referenceCandidate,${csvValue(payload.referenceCandidate)}`,
       `gsrm,${csvValue(payload.gsrm)}`,
       `an,${csvValue(payload.an)}`,
@@ -689,7 +816,7 @@ const requestCancel = () => { cancelRequested.current = true; searchWorker.curre
       "status,geometry,massKg,maximumPressureMpa,burnTimeSec,averageThrustN,totalImpulseNs,reasons",
       ...rows.map((row: { status: string; geometry: string; massKg: number; maximumPressureMpa: number; burnTimeSec: number; averageThrustN: number; totalImpulseNs: number; reasons: string }) => [row.status, row.geometry, row.massKg, row.maximumPressureMpa, row.burnTimeSec, row.averageThrustN, row.totalImpulseNs, csvValue(row.reasons)].join(",")),
     ];
-    const text = format === "json" ? JSON.stringify({ ...payload, externalValidationComparisons, externalValidationQualityWarnings }, null, 2) : csvLines.join("\n");
+    const text = format === "json" ? JSON.stringify({ ...payload, sensitivityScenarios: sensitivityExport, externalValidationComparisons, externalValidationQualityWarnings }, null, 2) : csvLines.join("\n");
     const blob = new Blob([text], { type: format === "json" ? "application/json" : "text/csv;charset=utf-8" });
     const url = URL.createObjectURL(blob); const anchor = document.createElement("a"); anchor.href = url; anchor.download = `motorfit-results.${format}`; anchor.click(); URL.revokeObjectURL(url);
   };
@@ -698,7 +825,7 @@ const requestCancel = () => { cancelRequested.current = true; searchWorker.curre
     if (!basePayload) return;
     const name = saveName.trim() || `계산 결과 ${new Date().toLocaleString("ko-KR")}`;
     const id = createSavedCalculationId();
-    const payload = { ...basePayload, externalValidation: externalValidationRecords.filter((record) => record.calculationResultId === "current") };
+    const payload = { ...basePayload, sensitivityScenarios, externalValidation: externalValidationRecords.filter((record) => record.calculationResultId === "current") };
     const saved: SavedCalculation = { id, name, savedAt: createSavedCalculationTimestamp(), payload };
     setSavedResults((current) => [saved, ...current].slice(0, MAX_SAVED_RESULTS));
     if (payload.externalValidation.length) setExternalValidationRecords((current) => current.map((record) => record.calculationResultId === "current" ? { ...record, calculationResultId: id } : record));
@@ -713,6 +840,7 @@ const requestCancel = () => { cancelRequested.current = true; searchWorker.curre
   };
   const deleteSavedResult = (id: string) => { setSavedResults((current) => current.filter((entry) => entry.id !== id)); setExternalValidationRecords((current) => current.filter((record) => record.calculationResultId !== id)); };
   const loadSavedResult = (item: SavedCalculation) => {
+    if (Array.isArray(item.payload.sensitivityScenarios)) setSensitivityScenarios(item.payload.sensitivityScenarios.slice(0, 20));
     setHistoryNotice(`“${item.name}”을(를) 읽었습니다. 저장 당시 결과는 비교·재내보내기용으로 보존되며 현재 계산을 덮어쓰지 않습니다.`);
   };
   const exportHistoryBackup = () => {
@@ -744,7 +872,7 @@ const requestCancel = () => { cancelRequested.current = true; searchWorker.curre
     setPendingImport(null);
     setHistoryNotice(`${replace ? "백업으로 교체" : "백업을 추가"}했습니다. ${next.length}개를 보관합니다.`);
   };
-  const printCurrentReport = () => printReviewReport(buildExportPayload(), lastCalculationStatus, "MotorFit 설계 검토 리포트");
+  const printCurrentReport = () => { const payload = buildExportPayload(); printReviewReport(payload ? { ...payload, sensitivityScenarios } : payload, lastCalculationStatus, "MotorFit 설계 검토 리포트"); };
   const toggleSort = (key: CandidateSortKey) => {
     if (sortKey !== key) {
       setSortKey(key);
@@ -946,6 +1074,7 @@ const requestCancel = () => { cancelRequested.current = true; searchWorker.curre
 <p className="mt-1">자동 탐색 범위, 질량 오차, 압력 제한과 목표 추력 조건을 확인하고 상세 설정에서 허용 오차를 조정해보세요.</p>
 </div> : null}<div className="rounded-2xl border border-slate-200 bg-white px-4 py-3 text-xs leading-5 text-slate-600">
 {search.candidates.length > 0 && !search.candidates.some((candidate) => candidate.status !== "fail") && closestFailedCandidate ? <div className="mb-3 rounded-2xl border border-violet-200 bg-violet-50 px-3 py-3 text-violet-950"><div className="flex items-center gap-2"><StatusPill status="fail" reference /><span className="font-bold">참고용 탈락 후보</span></div><p className="mt-1 text-xs">추천 후보가 아니며, 목표 질량에 가장 가까운 탈락 후보입니다.</p><p className="mt-2 font-semibold">Do {closestFailedCandidate.input.grainOuterDiameterMm} × do {closestFailedCandidate.input.grainCoreDiameterMm} × Lo {closestFailedCandidate.input.segmentLengthMm} / {closestFailedCandidate.input.segmentCount} · {formatNumber(closestFailedCandidate.grainMassKg, 4)} kg · {closestFailedCandidate.reasons.join(" ")}</p><button type="button" aria-label="참고용 탈락 후보 상세 보기" onClick={() => openCandidateDetails(closestFailedCandidate)} className="mt-3 rounded-lg bg-violet-700 px-3 py-2 text-xs font-bold text-white hover:bg-violet-800 focus:outline-none focus:ring-2 focus:ring-violet-500">상세 보기</button></div> : null}
+<details className="mb-3 rounded-2xl border border-fuchsia-200 bg-fuchsia-50/60 px-4 py-3"><summary className="cursor-pointer font-bold text-fuchsia-950">민감도 비교 · what-if 시나리오</summary><div className="mt-3 space-y-3 text-xs text-fuchsia-950"><p>기준 결과를 보존한 채 사용자가 지정한 값만 바꾸어 기존 계산 엔진으로 독립 계산합니다. 민감도 결과는 what-if 비교이며 전역 최적해·안전·제작 가능 판정을 의미하지 않습니다.</p><div className="grid gap-2 sm:grid-cols-4"><label>변경 대상<select aria-label="민감도 변경 대상" value={sensitivityField} onChange={(event) => setSensitivityField(event.target.value as SensitivityField)} className="mt-1 w-full rounded-lg border border-fuchsia-200 bg-white px-2 py-1.5"><option value="targetFuelMassKg">목표 질량 (kg)</option><option value="maximumPressureMpa">최대 허용 압력 (MPa)</option><option value="targetAverageThrustN">목표 평균 추력 (N, blank=미입력)</option><option value="outerDiameterMm">Do 범위 (mm)</option><option value="coreDiameterMm">do 범위 (mm)</option><option value="segmentLengthMm">Lo 범위 (mm)</option><option value="segmentCount">세그먼트 수</option></select></label><label>시나리오 이름<input aria-label="민감도 시나리오 이름" value={sensitivityName} onChange={(event) => setSensitivityName(event.target.value)} placeholder="선택" className="mt-1 w-full rounded-lg border border-fuchsia-200 bg-white px-2 py-1.5" /></label><label>낮은 값<input aria-label="민감도 낮은 값" value={sensitivityLow} onChange={(event) => setSensitivityLow(event.target.value)} placeholder="예: 1.8" className="mt-1 w-full rounded-lg border border-fuchsia-200 bg-white px-2 py-1.5" /></label><label>높은 값<input aria-label="민감도 높은 값" value={sensitivityHigh} onChange={(event) => setSensitivityHigh(event.target.value)} placeholder="예: 2.2" className="mt-1 w-full rounded-lg border border-fuchsia-200 bg-white px-2 py-1.5" /></label></div><div className="flex flex-wrap gap-2"><button type="button" onClick={() => void addSensitivityScenario()} disabled={sensitivityRunning || !search} className="rounded-lg bg-fuchsia-700 px-3 py-1.5 font-bold text-white disabled:opacity-50">시나리오 계산</button><button type="button" onClick={exportSensitivityBackup} className="rounded-lg border border-fuchsia-300 bg-white px-3 py-1.5 font-bold text-fuchsia-900">민감도 백업</button><input ref={sensitivityBackupInput} type="file" accept="application/json,.json" aria-label="민감도 백업 파일 선택" className="sr-only" onChange={(event) => { const file = event.target.files?.[0]; if (file) void importSensitivityBackup(file); }} /><button type="button" onClick={() => sensitivityBackupInput.current?.click()} className="rounded-lg border border-fuchsia-300 bg-white px-3 py-1.5 font-bold text-fuchsia-900">민감도 복원</button></div>{sensitivityRunning ? <div className="rounded-lg border border-fuchsia-300 bg-white px-3 py-2"><div className="flex items-center justify-between"><span className="font-bold">민감도 계산 중 · {Math.round(progressPercent)}%</span><button type="button" onClick={requestCancel} className="rounded-md bg-fuchsia-700 px-2 py-1 font-bold text-white">민감도 계산 취소</button></div><p className="mt-1">{progressText}</p></div> : null}{sensitivityNotice ? <p role="status" className="rounded-lg border border-fuchsia-200 bg-white px-2 py-1.5">{sensitivityNotice}</p> : null}{sensitivityScenarios.length ? <div className="overflow-x-auto rounded-xl border border-fuchsia-200 bg-white"><table className="min-w-[850px] w-full text-left text-[11px]"><thead><tr className="border-b border-fuchsia-100"><th className="px-2 py-2">시나리오·입력 변화</th><th className="px-2 py-2">상태</th><th className="px-2 py-2">후보/정밀/확장</th><th className="px-2 py-2">추천·조건부·참고·탈락</th><th className="px-2 py-2">대표 후보·질량</th><th className="px-2 py-2">압력·시간·추력</th><th className="px-2 py-2">GSRM B·AN</th><th className="px-2 py-2">관리</th></tr></thead><tbody>{sensitivityScenarios.map((scenario) => <tr key={scenario.id} className="border-b border-fuchsia-50 align-top"><td className="px-2 py-2 font-bold">{scenario.name}<br /><span className="font-normal">{scenario.changeDescription}</span></td><td className="px-2 py-2 font-bold">{scenario.status === "completed" ? "완료" : scenario.status === "cancelled" ? "취소" : "실패"}{scenario.error ? <><br /><span className="font-normal text-rose-700">{scenario.error}</span></> : null}</td><td className="px-2 py-2">{scenario.result ? `${scenario.result.totalCombinations.toLocaleString()} / ${scenario.result.evaluatedCombinations.toLocaleString()} / ${scenario.result.automaticExpansionStage}단계` : "-"}</td><td className="px-2 py-2">{scenario.result ? `${scenario.result.counts.recommend} · ${scenario.result.counts.conditional} · ${scenario.result.counts.referenceRejected} · ${scenario.result.counts.rejected}` : "-"}</td><td className="px-2 py-2">{scenario.result?.representativeCandidate ? `${scenario.result.representativeCandidate.geometry} · ${formatNumber(Number(scenario.result.representativeCandidate.massKg), 4)} kg` : "없음"}</td><td className="px-2 py-2">{scenario.result?.representativeCandidate ? `${formatNumber(Number(scenario.result.representativeCandidate.maximumPressureMpa), 4)} MPa · ${formatNumber(Number(scenario.result.representativeCandidate.burnTimeSec), 4)} s · ${formatNumber(Number(scenario.result.representativeCandidate.averageThrustN), 2)} N` : "-"}</td><td className="px-2 py-2">{scenario.result ? `${scenario.result.gsrmB == null ? "-" : `${formatNumber(scenario.result.gsrmB, 2)} mm`} · ${scenario.result.an.total}개 (${scenario.result.an.recommend}/${scenario.result.an.conditional}/${scenario.result.an.fail})` : "-"}</td><td className="px-2 py-2"><button type="button" onClick={() => setSensitivityScenarios((current) => current.filter((item) => item.id !== scenario.id))} className="rounded-md border border-rose-200 px-2 py-1 text-rose-700">삭제</button></td></tr>)}</tbody></table></div> : <p className="rounded-lg border border-fuchsia-200 bg-white px-2 py-2">아직 비교 시나리오가 없습니다. 기준 결과를 계산한 뒤 낮은 값·높은 값을 직접 입력하세요.</p>}</div></details>
 <p className="font-bold text-slate-900">점수 기준 안내</p>
 <p className="mt-1">{SCORE_GUIDANCE}</p>
 <p className="mt-1 text-slate-500">질량 오차와 압력 제한을 기본으로 평가하고, 목표 추력 입력 시 추력 곡선 오차를 추가합니다.</p>
