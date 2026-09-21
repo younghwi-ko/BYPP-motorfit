@@ -6,7 +6,8 @@ const cases = [
 ] as const;
 
 async function calculate(page: Page, mass: string, pressure: string, thrust: string) {
-  await expect(page.getByRole("button", { name: "질량 기준 계산" })).toBeEnabled({ timeout: 30_000 });
+  const primaryCalculate = page.locator("aside").getByRole("button", { name: /^(계산 시작|다시 계산)$/ });
+  await expect(primaryCalculate).toBeEnabled({ timeout: 30_000 });
   await page.waitForTimeout(500);
   const fillVisible = async (name: string, value: string) => {
     const index = name.includes("질량") ? 0 : name.includes("압력") ? 1 : 2;
@@ -23,7 +24,7 @@ async function calculate(page: Page, mass: string, pressure: string, thrust: str
   await expect(page.locator("aside input[type=number]").nth(0)).toHaveValue(mass);
   await fillVisible("최대 허용 압력 MPa", pressure);
   await fillVisible("목표 평균 추력 N", thrust);
-  await page.getByRole("button", { name: "최종 추천 계산" }).click();
+  await primaryCalculate.click();
   await waitDone();
 }
 
@@ -54,14 +55,14 @@ test("잘못된 입력, 취소 후 재계산", async ({ page }) => {
   await page.getByRole("button", { name: /상세 설정 열기/ }).click();
   for (const [name, value] of [["Do · 외경 min", "40"], ["Do · 외경 max", "80"], ["do · 코어 직경 min", "10"], ["do · 코어 직경 max", "30"], ["Lo · 세그먼트 길이 min", "75"], ["Lo · 세그먼트 길이 max", "125"], ["세그먼트 수 최소", "2"], ["세그먼트 수 최대", "4"]] as const) { const field = page.getByRole("spinbutton", { name }); if (await field.count()) await field.fill(value); }
   await page.locator("aside input[type=number]").nth(0).fill("0");
-  await page.getByRole("button", { name: "질량 기준 계산" }).click();
+  await page.getByRole("button", { name: "계산 시작" }).click();
   await expect(page.getByText("입력을 확인하세요")).toBeVisible();
   await page.locator("aside input[type=number]").nth(0).fill("2.786");
-  await page.getByRole("button", { name: "질량 기준 계산" }).click();
+  await page.getByRole("button", { name: "계산 시작" }).click();
   await expect(page.getByRole("button", { name: "계산 취소" })).toBeVisible({ timeout: 10_000 });
   await page.getByRole("button", { name: "계산 취소" }).click();
   await expect(page.getByText("계산이 취소되었습니다.")).toBeVisible({ timeout: 30_000 });
-  await page.getByRole("button", { name: "질량 기준 계산" }).click();
+  await page.getByRole("button", { name: "계산 시작" }).click();
   await expect(page.getByText(/전체\s+[\d,]+개/)).toBeVisible({ timeout: 120_000 });
 });
 
@@ -217,7 +218,7 @@ test("민감도 입력 규칙과 취소 상태", async ({ page }) => {
   await expect(page.getByRole("button", { name: "민감도 계산 취소" })).toBeVisible({ timeout: 30000 });
   await page.getByRole("button", { name: "민감도 계산 취소" }).click();
   await expect(page.getByText("민감도 계산을 취소했습니다. 기준 결과는 보존됩니다.")).toBeVisible({ timeout: 30000 });
-  await expect(page.getByText("질량 기준 계산")).toBeVisible();
+  await expect(page.getByRole("button", { name: "다시 계산" })).toBeVisible();
 });
 
 test("390px 민감도 비교와 백업 버튼 상호작용", async ({ page }) => {
@@ -250,6 +251,22 @@ test("초보자 사용 설명서와 메인 화면 이동", async ({ page }) => {
   await expect(page.getByRole("heading", { name: "입력부터 결과 검토까지" })).toBeVisible();
   await page.goto("/");
   await expect(page.getByRole("link", { name: "사용 설명서", exact: true })).toBeVisible();
+});
+
+test("390px 첫 화면에서 기본 입력과 주 계산 행동을 우선 표시", async ({ page }) => {
+  await page.addInitScript(() => localStorage.clear());
+  await page.setViewportSize({ width: 390, height: 844 });
+  await page.goto("/");
+  const inputs = page.locator("aside input[type=number]");
+  await expect(inputs.nth(0)).toBeVisible();
+  await expect(inputs.nth(1)).toBeVisible();
+  const pressureBox = await inputs.nth(1).boundingBox();
+  expect(pressureBox?.y).toBeLessThan(900);
+  await expect(page.getByRole("button", { name: "계산 시작" })).toBeVisible();
+  await expect(page.getByRole("button", { name: "질량 기준 계산" })).toBeHidden();
+  await page.getByText("단계별 확인", { exact: false }).click();
+  await expect(page.getByRole("button", { name: "질량 기준 계산" })).toBeVisible();
+  expect(await page.evaluate(() => document.documentElement.scrollWidth <= document.documentElement.clientWidth)).toBe(true);
 });
 
 test("후보 유형별 상세보기와 비교 선택 분리", async ({ page }) => {
@@ -352,7 +369,7 @@ test("동일 입력은 동일한 대표 후보를 유지하고 모바일 요약�
   await calculate(page, "2.000", "4.0", "");
   const first = await page.getByTestId("representative-candidate").innerText();
   const firstCounts = await page.getByText(/전체\s+[\d,]+개 · 정밀 계산/).first().innerText();
-  await page.getByRole("button", { name: "최종 추천 계산" }).click();
+  await page.getByRole("button", { name: "다시 계산" }).click();
   await expect(page.getByText(/UI 단계\s*4\s*\/\s*4/)).toBeVisible({ timeout: 300_000 });
   const second = await page.getByTestId("representative-candidate").innerText();
   const secondCounts = await page.getByText(/전체\s+[\d,]+개 · 정밀 계산/).first().innerText();
@@ -365,7 +382,7 @@ test("저장 이력 손상 복구", async ({ page }) => {
     localStorage.setItem("motorfit-calculation-history-v1", "{broken-json");
   });
   await page.goto("/");
-  await page.getByRole("button", { name: "최종 추천 계산" }).click();
+  await page.getByRole("button", { name: "계산 시작" }).click();
   await page.getByText("계산 결과 이력", { exact: true }).click();
   await expect(page.getByText(/저장된 결과 데이터가 손상되어 무시했습니다/)).toBeVisible({ timeout: 120000 });
   expect(await page.evaluate(() => localStorage.getItem("motorfit-calculation-history-v1"))).toBe("[]");
@@ -437,7 +454,7 @@ test("인쇄 팝업 차단 시 명확한 오류 안내", async ({ page }) => {
   await page.context().addInitScript(blockPopup);
   await page.goto("/");
   await page.waitForTimeout(5000);
-  await page.getByRole("button", { name: "기준 설계로 초기화" }).click();
+  await page.getByRole("button", { name: "기준 예시 불러오기" }).click();
   await calculate(page, "0.3956", "4.1", "");
   await page.getByRole("button", { name: /인쇄 \/ PDF로 저장 · 설계 검토 리포트/ }).click();
   await expect(page.getByRole("status").filter({ hasText: "인쇄용 창이 차단되었습니다" })).toBeVisible();
