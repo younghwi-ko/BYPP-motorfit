@@ -82,12 +82,12 @@ function migrateStoredConfig(config: CandidateSearchConfig): CandidateSearchConf
 function Field({ label, value, step = "any", onChange, suffix, help }: { label: string; value: number; step?: number | "any"; onChange: (value: number) => void; suffix?: string; help?: string }) {
   return (
     <label className="block">
-      <span className="mb-1.5 block text-xs font-semibold text-slate-600">{label}</span>
+      <span className="mb-1.5 block text-[13px] font-semibold text-slate-700">{label}</span>
       <span className="relative block">
-        <input className="w-full rounded-xl border border-slate-200 bg-white px-3 py-2.5 text-sm text-slate-900 outline-none transition focus:border-cyan-500 focus:ring-2 focus:ring-cyan-100" type="number" step={step} value={value} onChange={(event) => onChange(Number(event.target.value))} />
-        {suffix ? <span className="pointer-events-none absolute top-1/2 right-3 -translate-y-1/2 text-xs text-slate-400">{suffix}</span> : null}
+        <input className="w-full rounded-xl border border-slate-300 bg-white px-3 py-2.5 text-base font-medium text-slate-950 outline-none transition focus:border-cyan-500 focus:ring-2 focus:ring-cyan-100" type="number" step={step} value={value} onChange={(event) => onChange(Number(event.target.value))} />
+        {suffix ? <span className="pointer-events-none absolute top-1/2 right-3 -translate-y-1/2 text-xs font-medium text-slate-600">{suffix}</span> : null}
       </span>
-      {help ? <span className="mt-1 block text-[11px] leading-4 text-slate-600">{help}</span> : null}
+      {help ? <span className="mt-1 block text-xs leading-5 text-slate-600">{help}</span> : null}
     </label>
   );
 }
@@ -103,9 +103,9 @@ function candidateNextCheck(candidate: CandidateResult) {
 
 function OptionalField({ label, value, onChange, suffix }: { label: string; value: string; onChange: (value: string) => void; suffix?: string }) {
   return <label className="block">
-<span className="mb-1.5 block text-xs font-semibold text-slate-600">{label}</span>
+<span className="mb-1.5 block text-[13px] font-semibold text-slate-700">{label}</span>
 <span className="relative block">
-<input className="w-full rounded-xl border border-slate-200 bg-white px-3 py-2.5 text-sm text-slate-900 outline-none transition focus:border-cyan-500 focus:ring-2 focus:ring-cyan-100" type="number" step="any" placeholder="선택 입력" value={value} onChange={(event) => onChange(event.target.value)} />{suffix ? <span className="pointer-events-none absolute top-1/2 right-3 -translate-y-1/2 text-xs text-slate-400">{suffix}</span> : null}</span>
+<input className="w-full rounded-xl border border-slate-300 bg-white px-3 py-2.5 text-base font-medium text-slate-950 outline-none transition focus:border-cyan-500 focus:ring-2 focus:ring-cyan-100" type="number" step="any" placeholder="선택 입력" value={value} onChange={(event) => onChange(event.target.value)} />{suffix ? <span className="pointer-events-none absolute top-1/2 right-3 -translate-y-1/2 text-xs font-medium text-slate-600">{suffix}</span> : null}</span>
 </label>;
 }
 
@@ -1149,15 +1149,15 @@ const requestCancel = () => { cancelRequested.current = true; searchWorker.curre
 <a href="/guide" className="inline-flex items-center px-2 py-2 text-xs font-semibold text-cyan-800 underline-offset-4 hover:underline focus:outline-none focus:ring-2 focus:ring-cyan-500">사용 설명서</a>
 </div>
 </header>
-      <div className="mt-4 grid gap-5 xl:grid-cols-[360px_1fr] xl:gap-6">
+      <div className="mt-4 grid gap-5 xl:grid-cols-[400px_1fr] xl:gap-6">
         <aside className={`${search ? "order-2" : "order-1"} h-fit rounded-xl border border-slate-300 bg-white p-4 sm:p-6 xl:order-1`}>
 <div className="flex rounded-xl bg-slate-100 p-1">{(["candidate", "excel"] as const).map((option) => <button key={option} type="button" onClick={() => setMode(option)} className={`flex-1 rounded-lg px-3 py-2 text-xs font-bold transition ${mode === option ? "bg-white text-cyan-700 shadow-sm" : "text-slate-500"}`}>{option === "candidate" ? "제작 후보 모드" : "Excel 재현 모드"}</button>)}</div>
 <p className="mt-3 rounded-xl bg-cyan-50 px-3 py-2 text-xs leading-5 text-cyan-800">{mode === "candidate" ? "Do · do · Lo는 정수 mm, 기본 5 mm 간격으로 후보를 생성합니다." : "원본 Excel 재현을 위해 소수 mm 입력을 허용하며 제작 단위 제약을 적용하지 않습니다."}</p>
           <div className="mt-6 space-y-5">
 <div className="rounded-xl border border-slate-300 bg-white p-4">
-<div className="flex items-center justify-between gap-3"><p className="text-sm font-bold text-slate-950">기본 입력</p><span className="text-[11px] text-slate-500">필수 2개 · 선택 1개</span></div>
-<ol className="mt-3 grid grid-cols-4 gap-1" aria-label="계산 진행 순서"><li className={`border-t-2 px-1 pt-2 text-center text-[10px] font-semibold ${completedStage >= 1 ? "border-emerald-600 text-emerald-800" : runningStage === 1 ? "border-cyan-700 text-cyan-900" : "border-slate-200 text-slate-500"}`}><span className="block font-mono">1</span>질량</li><li className={`border-t-2 px-1 pt-2 text-center text-[10px] font-semibold ${completedStage >= 2 ? "border-emerald-600 text-emerald-800" : runningStage === 2 ? "border-cyan-700 text-cyan-900" : "border-slate-200 text-slate-500"}`}><span className="block font-mono">2</span>압력</li><li className={`border-t-2 px-1 pt-2 text-center text-[10px] font-semibold ${completedStage >= 3 ? "border-emerald-600 text-emerald-800" : runningStage === 3 ? "border-cyan-700 text-cyan-900" : "border-slate-200 text-slate-500"}`}><span className="block font-mono">3</span>추력{targetThrustText.trim() === "" ? "(선택)" : ""}</li><li className={`border-t-2 px-1 pt-2 text-center text-[10px] font-semibold ${completedStage >= 4 ? "border-emerald-600 text-emerald-800" : runningStage === 4 ? "border-cyan-700 text-cyan-900" : "border-slate-200 text-slate-500"}`}><span className="block font-mono">4</span>최종 판정</li></ol>
-<p className="mt-2 text-[11px] leading-5 text-slate-500">계산 시작을 누르면 질량 → 압력 → 추력(입력 시) → 최종 판정 순서로 진행합니다.</p>
+<div className="flex items-center justify-between gap-3"><p className="text-sm font-bold text-slate-950">기본 입력</p><span className="text-xs font-medium text-slate-600">필수 2개 · 선택 1개</span></div>
+<ol className="mt-3 grid grid-cols-4 gap-1" aria-label="계산 진행 순서"><li className={`border-t-2 px-1 pt-2 text-center text-xs font-semibold ${completedStage >= 1 ? "border-emerald-600 text-emerald-800" : runningStage === 1 ? "border-cyan-700 text-cyan-900" : "border-slate-300 text-slate-600"}`}><span className="block font-mono">1</span>질량</li><li className={`border-t-2 px-1 pt-2 text-center text-xs font-semibold ${completedStage >= 2 ? "border-emerald-600 text-emerald-800" : runningStage === 2 ? "border-cyan-700 text-cyan-900" : "border-slate-300 text-slate-600"}`}><span className="block font-mono">2</span>압력</li><li className={`border-t-2 px-1 pt-2 text-center text-xs font-semibold ${completedStage >= 3 ? "border-emerald-600 text-emerald-800" : runningStage === 3 ? "border-cyan-700 text-cyan-900" : "border-slate-300 text-slate-600"}`}><span className="block font-mono">3</span>추력{targetThrustText.trim() === "" ? "(선택)" : ""}</li><li className={`border-t-2 px-1 pt-2 text-center text-xs font-semibold ${completedStage >= 4 ? "border-emerald-600 text-emerald-800" : runningStage === 4 ? "border-cyan-700 text-cyan-900" : "border-slate-300 text-slate-600"}`}><span className="block font-mono">4</span>최종 판정</li></ol>
+<p className="mt-2 text-xs leading-5 text-slate-600">계산 시작을 누르면 질량 → 압력 → 추력(입력 시) → 최종 판정 순서로 진행합니다.</p>
 <div className="mt-4 space-y-4">
 <Field label="목표 연료 질량 · 필수" value={config.targetFuelMassKg} onChange={(value) => updateNumber("targetFuelMassKg", value)} suffix="kg" help="계산할 추진제 질량의 상한입니다." />
 <Field label="최대 허용 압력 · 필수" value={config.maximumPressureMpa} onChange={(value) => updateNumber("maximumPressureMpa", value)} suffix="MPa" help="계산된 후보 압력과 비교할 상한입니다." />
@@ -1166,7 +1166,7 @@ const requestCancel = () => { cancelRequested.current = true; searchWorker.curre
 </div>
 <details className="mt-3 border-t border-slate-200 pt-3"><summary className="cursor-pointer text-xs font-semibold text-slate-600">단계별 확인 <span className="font-normal text-slate-500">개별 단계 상태를 확인할 때 사용</span></summary><div className="mt-3 grid gap-2"><button type="button" onClick={() => runSearch(1)} disabled={running} className="w-full rounded-md border border-slate-300 bg-white px-3 py-2 text-xs font-semibold text-slate-700 hover:border-cyan-700 disabled:opacity-60">질량 기준 계산</button><button type="button" onClick={() => runSearch(2)} disabled={running} className="w-full rounded-md border border-slate-300 bg-white px-3 py-2 text-xs font-semibold text-slate-700 hover:border-cyan-700 disabled:opacity-60">압력 조건 적용</button><button type="button" onClick={() => runSearch(3)} disabled={running} className="w-full rounded-md border border-slate-300 bg-white px-3 py-2 text-xs font-semibold text-slate-700 hover:border-cyan-700 disabled:opacity-60">추력 조건 적용</button></div></details>
 <details className="mt-3 border-t border-slate-200 pt-3 text-xs text-slate-600"><summary className="cursor-pointer font-semibold text-slate-700">계산 기준 보기</summary><p className="mt-2 leading-5">SRM_2023.xls의 Data and Kn, Pressure, Blowdown, Performance 계산 흐름을 재현하며 기준 케이스 검산을 완료했습니다. 세부 버전과 검산 정보는 계산 결과의 재현 정보에서 확인할 수 있습니다.</p></details>
-<p className="mt-3 rounded-xl border border-slate-200 bg-slate-50 px-3 py-2 text-xs font-semibold text-slate-700">현재 적용 중인 질량 허용 오차: <strong className="font-mono text-slate-950">{formatMassTolerance(config.fuelMassToleranceKg)}</strong> · 상세 설정에서 변경할 수 있으며 변경 후에는 재계산이 필요합니다.</p>
+<p className="mt-3 rounded-xl border border-slate-300 bg-slate-50 px-3 py-2.5 text-xs font-medium leading-5 text-slate-700">현재 적용 중인 질량 허용 오차: <strong className="font-mono text-sm text-slate-950">{formatMassTolerance(config.fuelMassToleranceKg)}</strong> · 상세 설정에서 변경할 수 있으며 변경 후에는 재계산이 필요합니다.</p>
 <div className="mt-4">
 <label className="block">
 <span className="mb-1.5 block text-xs font-semibold text-slate-600">추진제</span>
@@ -1230,10 +1230,11 @@ const requestCancel = () => { cancelRequested.current = true; searchWorker.curre
         <section className={`${search ? "order-1" : "order-2"} min-w-0 xl:order-2`}>{errorMessage ? <div className="mb-4 rounded-2xl border border-rose-200 bg-rose-50 px-4 py-3 text-sm leading-6 text-rose-800">
 <p className="font-bold">입력을 확인하세요</p>
 <p>{errorMessage}</p>
-</div> : null}{!search ? <div className="grid min-h-40 place-items-center rounded-xl border border-dashed border-slate-300 bg-white/60 p-6 text-center sm:min-h-64">
-<div>
-<h2 className="text-base font-bold text-slate-950">계산 결과가 여기에 표시됩니다</h2>
-<p className="mt-2 max-w-md text-sm leading-6 text-slate-500">기본 입력을 확인하고 <strong className="text-slate-700">계산 시작</strong>을 누르세요. 세부 계산 근거는 입력 영역의 ‘계산 기준 보기’에서 확인할 수 있습니다.</p>
+</div> : null}{!search ? <div className="border-y border-slate-300 bg-white/50 px-5 py-5 sm:px-6 sm:py-6">
+<div className="max-w-xl">
+<p className="text-xs font-semibold text-slate-500">계산 대기</p>
+<h2 className="mt-1 text-base font-bold text-slate-950">입력 후 계산 결과를 확인하세요</h2>
+<p className="mt-2 text-sm leading-6 text-slate-600">왼쪽의 기본 입력을 확인하고 <strong className="text-slate-800">계산 시작</strong>을 누르면 대표 후보와 판정 근거가 표시됩니다.</p>
 </div>
 </div> : <div className="space-y-6">
 <div className="rounded-3xl border border-cyan-200 bg-gradient-to-br from-cyan-50 to-white p-4 shadow-sm sm:p-5"><div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between"><div><p className="text-xs font-bold uppercase tracking-[0.14em] text-cyan-700">현재 계산 요약</p><h2 className="mt-1 text-lg font-bold text-slate-950">목표와 탐색 상태를 한눈에 확인하세요</h2></div><span className="rounded-full bg-slate-900 px-3 py-1 text-xs font-bold text-white">UI 단계 {completedStage}/4</span></div><div className="mt-4 grid grid-cols-2 gap-2 sm:grid-cols-4"><div className="rounded-2xl bg-white px-3 py-3 shadow-sm"><p className="text-[11px] font-semibold text-slate-500">목표 질량</p><p className="mt-1 text-base font-bold text-slate-950">{formatNumber(config.targetFuelMassKg, 4)} <span className="text-xs font-normal text-slate-500">kg</span></p></div><div className="rounded-2xl bg-white px-3 py-3 shadow-sm"><p className="text-[11px] font-semibold text-slate-500">최대 허용 압력</p><p className="mt-1 text-base font-bold text-slate-950">{formatNumber(config.maximumPressureMpa, 3)} <span className="text-xs font-normal text-slate-500">MPa</span></p></div><div className="rounded-2xl bg-white px-3 py-3 shadow-sm"><p className="text-[11px] font-semibold text-slate-500">목표 평균 추력</p><p className="mt-1 text-base font-bold text-slate-950">{targetThrustText.trim() === "" ? "미입력" : `${formatNumber(Number(targetThrustText), 2)} N`}</p></div><div className="rounded-2xl bg-white px-3 py-3 shadow-sm"><p className="text-[11px] font-semibold text-slate-500">자동 확장 단계</p><p className="mt-1 text-base font-bold text-violet-700">{search ? `${search.automaticExpansionStage ?? 0}단계` : "대기"}</p></div></div><p className="mt-3 text-[11px] text-slate-600">질량 계산은 형상·연료 밀도·세그먼트로 산출하고, 압력은 산출된 후보의 최대 압력을 허용값과 비교합니다. UI 단계는 질량 → 압력 → 추력(입력 시) → 최종 판정이며, 자동 확장 단계는 탐색 범위 확장 횟수입니다. 결과의 질량 값은 계산된 후보별 연료 질량이고, 압력 판정은 각 후보의 최대 압력과 허용 압력의 비교 결과입니다.</p></div>

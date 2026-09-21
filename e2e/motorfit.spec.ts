@@ -269,6 +269,19 @@ test("390px 첫 화면에서 기본 입력과 주 계산 행동을 우선 표시
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= document.documentElement.clientWidth)).toBe(true);
 });
 
+test("데스크톱 계산 대기 안내는 짧고 중립적인 상태로 표시", async ({ page }) => {
+  await page.addInitScript(() => localStorage.clear());
+  await page.setViewportSize({ width: 1280, height: 720 });
+  await page.goto("/");
+  const heading = page.getByRole("heading", { name: "입력 후 계산 결과를 확인하세요" });
+  await expect(heading).toBeVisible();
+  const emptyState = heading.locator("..").locator("..");
+  const box = await emptyState.boundingBox();
+  expect(box?.height).toBeLessThan(180);
+  expect(await emptyState.evaluate((element) => getComputedStyle(element).borderTopStyle)).toBe("solid");
+  await expect(page.locator("aside").getByRole("button", { name: "계산 시작" })).toBeVisible();
+});
+
 test("후보 유형별 상세보기와 비교 선택 분리", async ({ page }) => {
   await page.addInitScript(() => localStorage.clear());
   await page.goto("/");
