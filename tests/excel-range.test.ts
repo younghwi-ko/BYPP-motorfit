@@ -96,6 +96,37 @@ describe("Excel 최소값 기준 1 mm 범위 탐색", () => {
     expect(result.searchEnvelope?.segmentCount).toEqual({ min: 1, max: 2 });
   });
 
+  it("동일 범위에서 상한 이후의 유효 후보를 상한 증가 시 실제 평가한다", () => {
+    const config = { ...baseline, mode: "excel" as const, fuelMassToleranceKg: 0.001, outerDiameterMm: { min: 45, max: 46 }, coreDiameterMm: { min: 15, max: 15 }, segmentLengthMm: { min: 78, max: 80 }, segmentCount: { min: 2, max: 2 } };
+    const low = searchCandidates({ ...config, maxCandidateCount: 1 });
+    const full = searchCandidates({ ...config, maxCandidateCount: 10 });
+    expect(low.precisionEvaluation).toMatchObject({ totalCombinations: 6, eligibleCandidates: 3, attemptedCandidates: 1, excludedByLimit: 2, maxCandidateCount: 1, limited: true, scope: "evaluated-subset", selectionOrder: "range" });
+    expect(full.precisionEvaluation).toMatchObject({ totalCombinations: 6, eligibleCandidates: 3, attemptedCandidates: 3, excludedByLimit: 0, maxCandidateCount: 10, limited: false, scope: "all-preprocessed-candidates" });
+    expect(low.massFilteredCount).toBe(3);
+    expect(low.passedCandidates).toHaveLength(0);
+    expect(low.candidates.map((candidate) => candidate.input.segmentLengthMm)).toEqual([78]);
+    expect(full.candidates.find((candidate) => candidate.input.segmentLengthMm === 80)?.status).toBe("conditional");
+    expect(full.candidates.find((candidate) => candidate.input.segmentLengthMm === 78)).toEqual(low.candidates[0]);
+    expect(full.metadata?.precisionEvaluation).toEqual(full.precisionEvaluation);
+    expect(low.diagnosis).toContain("미평가 후보");
+    expect(low.precisionEvaluation?.note).toContain("앞부분만 평가");
+    expect(low.searchEnvelope).toEqual(full.searchEnvelope);
+  });
+
+  it("평가 시도 수는 형상 탈락·계산 실패와 구분하며 상한 제외 수와 중복하지 않는다", () => {
+    const result = searchCandidates({ ...rangeConfig, outerDiameterMm: { min: 40, max: 40 }, coreDiameterMm: { min: 41, max: 42 }, segmentLengthMm: { min: 80, max: 80 }, segmentCount: { min: 1, max: 1 }, maxCandidateCount: 1 });
+    expect(result.precisionEvaluation).toMatchObject({ totalCombinations: 2, eligibleCandidates: 2, attemptedCandidates: 1, excludedByLimit: 1 });
+    expect(result.precisionValidationRejectedCount).toBe(1);
+    expect(result.candidates).toHaveLength(0);
+  });
+
+  it("Excel 정밀 상한은 양의 안전한 정수만 허용한다", () => {
+    for (const maxCandidateCount of [0, -1, 1.5, Number.NaN, Number.POSITIVE_INFINITY, Number.MAX_SAFE_INTEGER + 1]) {
+      expect(() => searchCandidates({ ...rangeConfig, maxCandidateCount })).toThrow(/정밀 계산 최대 후보 수/);
+    }
+    expect(searchCandidates({ ...rangeConfig, maxCandidateCount: 200 }).metadata?.input.maxCandidateCount).toBe(200);
+  });
+
   it("범위 역전과 비정수 세그먼트 범위를 오류로 처리한다", () => {
     expect(() => searchCandidates({ ...rangeConfig, outerDiameterMm: { min: 42, max: 40 } })).toThrow(CandidateSearchInputError);
     expect(() => searchCandidates({ ...rangeConfig, segmentCount: { min: 2, max: 1 } })).toThrow(CandidateSearchInputError);

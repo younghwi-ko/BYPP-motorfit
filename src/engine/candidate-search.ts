@@ -16,6 +16,7 @@ import type {
   CandidateSearchProgress,
   CandidateSearchResult,
   DataAndKnInput,
+  PrecisionEvaluationSummary,
 } from "./types";
 import { AN_CATALOG_ITEM_COUNT, AN_CATALOG_VERSION, APP_VERSION, BASELINE_VERSION, CALCULATION_ENGINE_VERSION, GSRM_REFERENCE_VERSION } from "./metadata";
 
@@ -53,8 +54,16 @@ function validateRange(name: string, range: CandidateNumberRange, issues: string
   if (!Number.isFinite(step) || step <= 0) issues.push(`${name} 간격은 0보다 큰 숫자여야 합니다.`);
 }
 
+export function excelPrecisionLimitIssue(value: number): string | undefined {
+  return Number.isSafeInteger(value) && value > 0 ? undefined : "정밀 계산 최대 후보 수는 1 이상의 안전한 정수여야 합니다.";
+}
+
 export function validateCandidateSearchConfig(config: CandidateSearchConfig): readonly string[] {
   const issues: string[] = [];
+  if (config.mode === "excel" && config.maxCandidateCount !== undefined) {
+    const issue = excelPrecisionLimitIssue(config.maxCandidateCount);
+    if (issue) issues.push(issue);
+  }
   const positive = [
     ["챔버 직경", config.chamberDiameterMm], ["챔버 길이", config.chamberLengthMm],
     ["목표 연료 질량", config.targetFuelMassKg], ["질량 허용 오차", config.fuelMassToleranceKg],
@@ -288,6 +297,19 @@ function compareCandidatePriority(left: CandidateResult, right: CandidateResult,
 }
 
 function finishSearch(config: CandidateSearchConfig, prepared: PreparedSearch, candidates: CandidateResult[], counters: SearchCounters): CandidateSearchResult {
+  const precisionEvaluation: PrecisionEvaluationSummary | undefined = config.mode === "excel" ? {
+    totalCombinations: prepared.totalCombinations,
+    eligibleCandidates: prepared.geometries.length,
+    attemptedCandidates: counters.evaluatedCombinations,
+    excludedByLimit: prepared.geometries.length - prepared.precisionGeometries.length,
+    maxCandidateCount: config.maxCandidateCount ?? DEFAULT_MAX_CANDIDATES,
+    limited: prepared.truncated,
+    selectionOrder: "range",
+    scope: prepared.truncated ? "evaluated-subset" : "all-preprocessed-candidates",
+    note: prepared.truncated
+      ? "전처리 후 범위 나열 순서(Do → do → Lo → 세그먼트)의 앞부분만 평가했습니다. 대표·참고 후보와 판정 집계는 평가한 일부 후보 기준이며, 입력 범위 전체의 최상위 후보나 후보 부재를 뜻하지 않습니다. 상한을 늘린 뒤 재계산할 수 있습니다."
+      : "전처리 후 정밀 계산 대상을 모두 평가했습니다. 형상 검증 탈락과 계산 실패도 평가 시도 수에 포함됩니다. 전역 최적해나 안전 판정은 아닙니다.",
+  } : undefined;
   candidates.sort((left, right) => compareCandidatePriority(left, right, config));
   const passedCandidates = candidates.filter((candidate) => candidate.status !== "fail");
   const nearestRejectedCandidate = candidates.filter((candidate) => candidate.status === "fail").reduce<CandidateResult | undefined>((closest, candidate) => {
@@ -326,6 +348,7 @@ function finishSearch(config: CandidateSearchConfig, prepared: PreparedSearch, c
   const referenceRejected = passedCandidates.length === 0 && nearestRejectedCandidate ? 1 : 0;
   const rejected = candidates.filter((candidate) => candidate.status === "fail").length - referenceRejected;
   return {
+    ...(precisionEvaluation ? { precisionEvaluation } : {}),
     candidates, passedCandidates, nearestRejectedCandidate, totalCombinations: prepared.totalCombinations,
     evaluatedCombinations: counters.evaluatedCombinations,
     rejectedByValidation: prepared.prevalidationRejectedCount + counters.precisionValidationRejectedCount,
@@ -336,11 +359,11 @@ function finishSearch(config: CandidateSearchConfig, prepared: PreparedSearch, c
     prefilteredCandidateCount: prepared.geometries.length,
     targetMassNearbyIncluded: prepared.targetMassNearbyIncluded,
     truncated: prepared.truncated,
-    warning: config.searchOrder === "target-mass" ? `${partialWarning} ${automaticSummary}` : (prepared.truncated ? `후보 조합 ${prepared.totalCombinations.toLocaleString()}개 중 ${counters.evaluatedCombinations.toLocaleString()}개만 계산했으며 전역 최적해를 보장하지 않습니다.` : automaticSummary),
-    diagnosis: automaticDiagnosis,
+    warning: config.searchOrder === "target-mass" ? `${partialWarning} ${automaticSummary}` : (prepared.truncated ? `후보 조합 ${prepared.totalCombinations.toLocaleString()}개 중 ${counters.evaluatedCombinations.toLocaleString()}개만 계산했으며 전역 최적해를 보장하지 않습니다.${precisionEvaluation ? ` ${precisionEvaluation.note}` : ""}` : automaticSummary),
+    diagnosis: precisionEvaluation?.limited ? "일부 후보만 평가했습니다. 미평가 후보가 있어 입력 범위 전체의 후보 유무를 판단할 수 없습니다." : automaticDiagnosis,
     automaticExpansionStage: config.automaticExpansionStage,
     searchEnvelope: { chamberDiameterMm: config.chamberDiameterMm, chamberLengthMm: config.chamberLengthMm, outerDiameterMm: config.outerDiameterMm, coreDiameterMm: config.coreDiameterMm, segmentLengthMm: config.segmentLengthMm, segmentCount: config.segmentCount },
-    metadata: { appVersion: APP_VERSION, engineVersion: CALCULATION_ENGINE_VERSION, calculatedAt: new Date().toISOString(), input: { ...config }, fuelMassToleranceKg: config.fuelMassToleranceKg, searchMode: config.mode ?? "candidate", automaticExpansionStage: config.automaticExpansionStage, totalCombinations: prepared.totalCombinations, evaluatedCombinations: counters.evaluatedCombinations, calculationFailures: counters.calculationFailures, counts: { recommend: candidates.filter((candidate) => candidate.status === "pass").length, conditional: candidates.filter((candidate) => candidate.status === "conditional").length, referenceRejected, rejected }, baselineVersion: BASELINE_VERSION, gsrmReferenceVersion: GSRM_REFERENCE_VERSION, anCatalogVersion: AN_CATALOG_VERSION, anCatalogItemCount: AN_CATALOG_ITEM_COUNT, status: "completed" },
+    metadata: { ...(precisionEvaluation ? { precisionEvaluation } : {}), appVersion: APP_VERSION, engineVersion: CALCULATION_ENGINE_VERSION, calculatedAt: new Date().toISOString(), input: { ...config }, fuelMassToleranceKg: config.fuelMassToleranceKg, searchMode: config.mode ?? "candidate", automaticExpansionStage: config.automaticExpansionStage, totalCombinations: prepared.totalCombinations, evaluatedCombinations: counters.evaluatedCombinations, calculationFailures: counters.calculationFailures, counts: { recommend: candidates.filter((candidate) => candidate.status === "pass").length, conditional: candidates.filter((candidate) => candidate.status === "conditional").length, referenceRejected, rejected }, baselineVersion: BASELINE_VERSION, gsrmReferenceVersion: GSRM_REFERENCE_VERSION, anCatalogVersion: AN_CATALOG_VERSION, anCatalogItemCount: AN_CATALOG_ITEM_COUNT, status: "completed" },
   };
 }
 

@@ -327,7 +327,20 @@ export interface ThrustCurveEvaluation {
   variabilityN: number;
 }
 
+export interface PrecisionEvaluationSummary {
+  totalCombinations: number;
+  eligibleCandidates: number;
+  attemptedCandidates: number;
+  excludedByLimit: number;
+  maxCandidateCount: number;
+  limited: boolean;
+  selectionOrder: "range";
+  scope: "evaluated-subset" | "all-preprocessed-candidates";
+  note: string;
+}
+
 export interface CandidateSearchResult {
+  precisionEvaluation?: PrecisionEvaluationSummary;
   candidates: readonly CandidateResult[];
   passedCandidates: readonly CandidateResult[];
   nearestRejectedCandidate?: CandidateResult;
@@ -356,6 +369,7 @@ export interface CandidateSearchResult {
 }
 
 export interface CalculationMetadata {
+  precisionEvaluation?: PrecisionEvaluationSummary;
   appVersion: string;
   engineVersion: string;
   calculatedAt: string;
