@@ -20,6 +20,7 @@ export {
   CandidateSearchInputError,
   estimateCandidateCount,
   createAutomaticCandidateSearchConfig,
+  createExcelRangeSearchConfig,
   searchCandidates,
   searchCandidatesAsync,
   MASS_UPPER_EPSILON_KG,

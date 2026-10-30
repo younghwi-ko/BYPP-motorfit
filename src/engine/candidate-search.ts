@@ -91,17 +91,42 @@ function rangeValues(range: CandidateNumberRange, fallbackStep: number): number[
   return values;
 }
 
+/** Excel dimensions start at the exact input minimum, with no rounded endpoint. */
+function dimensionValues(config: CandidateSearchConfig, range: CandidateNumberRange): number[] {
+  if (config.mode !== "excel") return rangeValues(range, 5);
+  if (!Number.isFinite(range.min) || !Number.isFinite(range.max) || range.max < range.min) return [];
+  // Subtraction can round down (1.9 - 0.9 < 1). Generate one possible
+  // extra grid point, then test the original upper bound without an epsilon.
+  return Array.from({ length: Math.ceil(range.max - range.min) + 1 }, (_, index) => range.min + index)
+    .filter((value) => value <= range.max);
+}
+
+export function createExcelRangeSearchConfig(config: CandidateSearchConfig): CandidateSearchConfig {
+  return {
+    ...config,
+    mode: "excel",
+    outerDiameterMm: { ...config.outerDiameterMm, step: 1 },
+    coreDiameterMm: { ...config.coreDiameterMm, step: 1 },
+    segmentLengthMm: { ...config.segmentLengthMm, step: 1 },
+    segmentCount: { ...config.segmentCount },
+    searchOrder: "range",
+    automaticExpansionStage: 0,
+    maxCandidateCount: config.maxCandidateCount ?? DEFAULT_MAX_CANDIDATES,
+  };
+}
+
 function integerValues(min: number, max: number): number[] {
   if (!Number.isInteger(min) || !Number.isInteger(max) || max < min) return [];
   return Array.from({ length: max - min + 1 }, (_, index) => min + index);
 }
 
 export function estimateCandidateCount(config: CandidateSearchConfig): number {
-  return rangeValues(config.outerDiameterMm, 5).length * rangeValues(config.coreDiameterMm, 5).length * rangeValues(config.segmentLengthMm, 5).length * integerValues(config.segmentCount.min, config.segmentCount.max).length;
+  return dimensionValues(config, config.outerDiameterMm).length * dimensionValues(config, config.coreDiameterMm).length * dimensionValues(config, config.segmentLengthMm).length * integerValues(config.segmentCount.min, config.segmentCount.max).length;
 }
 
 /** Build a bounded 5 mm manufacturing search envelope from target mass. */
 export function createAutomaticCandidateSearchConfig(config: CandidateSearchConfig): CandidateSearchConfig {
+  if (config.mode === "excel") return createExcelRangeSearchConfig(config);
   const massRatio = Math.max(1, Math.max(config.targetFuelMassKg, 0.01) / 0.3956);
   const expansionStage = massRatio <= 1.5 ? 0 : massRatio <= 3.5 ? 1 : 2;
   const linearScale = Math.cbrt(massRatio);
@@ -166,9 +191,9 @@ function approximateGrainMassKg(config: CandidateSearchConfig, outerDiameterMm: 
 function prepareSearch(config: CandidateSearchConfig): PreparedSearch {
   const inputIssues = validateCandidateSearchConfig(config);
   if (inputIssues.length > 0) throw new CandidateSearchInputError(inputIssues);
-  const outerValues = rangeValues(config.outerDiameterMm, 5);
-  const coreValues = rangeValues(config.coreDiameterMm, 5);
-  const lengthValues = rangeValues(config.segmentLengthMm, 5);
+  const outerValues = dimensionValues(config, config.outerDiameterMm);
+  const coreValues = dimensionValues(config, config.coreDiameterMm);
+  const lengthValues = dimensionValues(config, config.segmentLengthMm);
   const segmentValues = integerValues(config.segmentCount.min, config.segmentCount.max);
   const totalCombinations = outerValues.length * coreValues.length * lengthValues.length * segmentValues.length;
   let prevalidationRejectedCount = 0;
@@ -327,6 +352,7 @@ function accumulate(result: ReturnType<typeof evaluateGeometry>, candidates: Can
 }
 
 export function searchCandidates(config: CandidateSearchConfig): CandidateSearchResult {
+  if (config.mode === "excel") config = createExcelRangeSearchConfig(config);
   const prepared = prepareSearch(config);
   const candidates: CandidateResult[] = [];
   const counters: SearchCounters = { evaluatedCombinations: 0, precisionValidationRejectedCount: 0, calculationFailures: 0 };
@@ -335,6 +361,7 @@ export function searchCandidates(config: CandidateSearchConfig): CandidateSearch
 }
 
 export async function searchCandidatesAsync(config: CandidateSearchConfig, options: { batchSize?: number; onProgress?: (progress: CandidateSearchProgress) => void; shouldCancel?: () => boolean } = {}): Promise<CandidateSearchResult> {
+  if (config.mode === "excel") config = createExcelRangeSearchConfig(config);
   const prepared = prepareSearch(config);
   const candidates: CandidateResult[] = [];
   const counters: SearchCounters = { evaluatedCombinations: 0, precisionValidationRejectedCount: 0, calculationFailures: 0 };

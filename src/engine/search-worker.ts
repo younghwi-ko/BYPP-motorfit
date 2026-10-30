@@ -1,4 +1,4 @@
-import { CandidateSearchCancelledError, CandidateSearchInputError, createAutomaticCandidateSearchConfig, estimateCandidateCount, searchCandidatesAsync } from "./candidate-search";
+import { CandidateSearchCancelledError, CandidateSearchInputError, createAutomaticCandidateSearchConfig, createExcelRangeSearchConfig, estimateCandidateCount, searchCandidatesAsync } from "./candidate-search";
 import type { CandidateSearchConfig } from "./types";
 
 type WorkerMessage = { type: "run"; config: CandidateSearchConfig; mode: "candidate" | "excel"; automaticMode: boolean; batchSize: number } | { type: "cancel" };
@@ -10,7 +10,7 @@ workerScope.onmessage = async (event) => {
   cancelled = false;
   try {
     const baseConfig = event.data.config;
-    const runConfig: CandidateSearchConfig = event.data.mode === "excel" ? { ...baseConfig, targetThrustEnabled: true, outerDiameterMm: { min: baseConfig.outerDiameterMm.min, max: baseConfig.outerDiameterMm.min, step: 1 }, coreDiameterMm: { min: baseConfig.coreDiameterMm.min, max: baseConfig.coreDiameterMm.min, step: 1 }, segmentLengthMm: { min: baseConfig.segmentLengthMm.min, max: baseConfig.segmentLengthMm.min, step: 1 }, segmentCount: { min: baseConfig.segmentCount.min, max: baseConfig.segmentCount.min }, maxCandidateCount: 1 } : event.data.automaticMode ? createAutomaticCandidateSearchConfig(baseConfig) : { ...baseConfig, maxCandidateCount: Number.MAX_SAFE_INTEGER };
+    const runConfig: CandidateSearchConfig = event.data.mode === "excel" ? createExcelRangeSearchConfig(baseConfig) : event.data.automaticMode ? createAutomaticCandidateSearchConfig(baseConfig) : { ...baseConfig, maxCandidateCount: Number.MAX_SAFE_INTEGER };
     const totalCandidates = estimateCandidateCount(runConfig);
     workerScope.postMessage({ type: "prepared", totalCandidates, plannedPrecision: Math.min(totalCandidates, runConfig.maxCandidateCount ?? totalCandidates) });
     const result = await searchCandidatesAsync(runConfig, { batchSize: event.data.batchSize, shouldCancel: () => cancelled, onProgress: (progress) => workerScope.postMessage({ type: "progress", ...progress }) });

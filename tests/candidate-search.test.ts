@@ -369,7 +369,7 @@ describe("automatic candidate envelope", () => {
       counts: { total: result.totalCombinations, evaluated: result.evaluatedCombinations, failures: result.calculationFailures, passed: result.passedCandidates.length, reference: result.passedCandidates.length === 0 ? result.nearestRejectedCandidate?.input ?? null : null },
     });
     expect(project(first)).toEqual(project(second));
-    expect(first.metadata?.engineVersion).toBe("candidate-search-1");
+    expect(first.metadata?.engineVersion).toBe("candidate-search-2");
     expect(first.metadata?.anCatalogItemCount).toBe(241);
     expect(first.metadata?.status).toBe("completed");
   });
