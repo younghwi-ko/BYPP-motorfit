@@ -287,6 +287,7 @@ export interface CandidateSearchConfig {
   maxCandidateCount?: number;
   burnTimeFilterEnabled?: boolean;
   searchOrder?: "range" | "target-mass";
+  rangeSource?: "automatic" | "manual";
   targetThrustEnabled?: boolean;
   automaticExpansionStage?: number;
 }
@@ -334,7 +335,7 @@ export interface PrecisionEvaluationSummary {
   excludedByLimit: number;
   maxCandidateCount: number;
   limited: boolean;
-  selectionOrder: "range";
+  selectionOrder: "range" | "target-mass";
   scope: "evaluated-subset" | "all-preprocessed-candidates";
   note: string;
 }

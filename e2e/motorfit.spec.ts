@@ -53,6 +53,7 @@ test.describe("MotorFit 8개 자동 추천 케이스", () => {
 test("잘못된 입력, 취소 후 재계산", async ({ page }) => {
   await page.addInitScript(() => localStorage.clear()); await page.goto("/"); await page.waitForTimeout(5000);
   await page.getByRole("button", { name: /상세 설정 열기/ }).click();
+  await page.getByLabel("탐색 범위 설정", { exact: true }).selectOption("manual");
   for (const [name, value] of [["Do · 외경 min", "40"], ["Do · 외경 max", "80"], ["do · 코어 직경 min", "10"], ["do · 코어 직경 max", "30"], ["Lo · 세그먼트 길이 min", "75"], ["Lo · 세그먼트 길이 max", "125"], ["세그먼트 수 최소", "2"], ["세그먼트 수 최대", "4"]] as const) { const field = page.getByRole("spinbutton", { name }); if (await field.count()) await field.fill(value); }
   await page.locator("aside input[type=number]").nth(0).fill("0");
   await page.getByRole("button", { name: "계산 시작" }).click();
@@ -97,7 +98,7 @@ test("AN 241개, 검색, 필터, 3개 비교, 내보내기", async ({ page }) =>
   expect(payload.resultSemantics.targetThrustCondition).toBe("미입력·미계산");
   expect(payload.an.catalogSize).toBe(241); expect(payload.an.query).toBeDefined(); expect(payload.an.page).toBeDefined(); expect(payload.referenceRule).toContain("추천·조건부"); expect((await readFile(csvPath!, "utf8")).length).toBeGreaterThan(100);
   expect(payload.input.fuelMassToleranceDisplay).toBe("0.010 kg"); expect(payload.search.counts.referenceRejected).toBe(0); expect(payload.representativeCandidate).toBeDefined();
-  expect(payload.metadata.engineVersion).toBe("candidate-search-2"); expect(payload.metadata.status).toBe("completed"); expect(payload.metadata.anCatalogItemCount).toBe(241); expect(payload.metadata.calculatedAt).toBeTruthy();
+  expect(payload.metadata.engineVersion).toBe("candidate-search-3"); expect(payload.metadata.status).toBe("completed"); expect(payload.metadata.anCatalogItemCount).toBe(241); expect(payload.metadata.calculatedAt).toBeTruthy();
   expect(payload.modelValidationLevel).toContain("기준 모델"); expect(payload.baselineReproductionStatus).toBe("확인됨"); expect(payload.deterministicCalculationStatus).toBe("확인됨"); expect(payload.hardwareValidationStatus).toBe("확인되지 않음"); expect(payload.productionApprovalStatus).toBe("제공하지 않음"); expect(payload.validationDataAvailable).toBe(false); expect(payload.assumptions.length).toBeGreaterThan(0); expect(payload.limitations.length).toBeGreaterThan(0);
   expect(payload.validation.status).toBe("NOT_RUN"); expect(payload.validation.summary).toContain("실행하지 않음"); expect(payload.validation.baselineStatus).toBe("PASS"); expect(payload.validation.fixtures.length).toBeGreaterThan(0);
   expect(csv).toContain("validation"); expect(csv).toContain("modelValidationLevel"); expect(csv).toContain("hardwareValidationStatus"); expect(csv).toContain("validationDataAvailable");

@@ -10,7 +10,7 @@ workerScope.onmessage = async (event) => {
   cancelled = false;
   try {
     const baseConfig = event.data.config;
-    const runConfig: CandidateSearchConfig = event.data.mode === "excel" ? createExcelRangeSearchConfig(baseConfig) : event.data.automaticMode ? createAutomaticCandidateSearchConfig(baseConfig) : { ...baseConfig, maxCandidateCount: Number.MAX_SAFE_INTEGER };
+    const runConfig: CandidateSearchConfig = event.data.mode === "excel" ? createExcelRangeSearchConfig(baseConfig) : event.data.automaticMode ? createAutomaticCandidateSearchConfig(baseConfig) : { ...baseConfig, rangeSource: "manual", searchOrder: "range", automaticExpansionStage: 0, maxCandidateCount: Number.MAX_SAFE_INTEGER };
     const totalCandidates = estimateCandidateCount(runConfig);
     workerScope.postMessage({ type: "prepared", totalCandidates, plannedPrecision: Math.min(totalCandidates, runConfig.maxCandidateCount ?? totalCandidates) });
     const result = await searchCandidatesAsync(runConfig, { batchSize: event.data.batchSize, shouldCancel: () => cancelled, onProgress: (progress) => workerScope.postMessage({ type: "progress", ...progress }) });

@@ -118,7 +118,8 @@ export function createExcelRangeSearchConfig(config: CandidateSearchConfig): Can
     coreDiameterMm: { ...config.coreDiameterMm, step: 1 },
     segmentLengthMm: { ...config.segmentLengthMm, step: 1 },
     segmentCount: { ...config.segmentCount },
-    searchOrder: "range",
+    searchOrder: "target-mass",
+    rangeSource: "manual",
     automaticExpansionStage: 0,
     maxCandidateCount: config.maxCandidateCount ?? DEFAULT_MAX_CANDIDATES,
   };
@@ -160,7 +161,8 @@ export function createAutomaticCandidateSearchConfig(config: CandidateSearchConf
     segmentCount: { min: 1, max: Math.min(8, Math.max(3, Math.ceil(linearScale * 3))) },
     maxCandidateCount: precisionBudget,
     manufacturingStepMm: 5,
-    burnTimeFilterEnabled: false,
+    burnTimeFilterEnabled: config.burnTimeFilterEnabled ?? false,
+    rangeSource: "automatic",
     searchOrder: "target-mass",
     automaticExpansionStage: expansionStage,
   };
@@ -210,7 +212,7 @@ function prepareSearch(config: CandidateSearchConfig): PreparedSearch {
   let maximumApproximateMassKg = 0;
   const geometries: CandidateGeometry[] = [];
   for (const outerDiameterMm of outerValues) for (const coreDiameterMm of coreValues) for (const segmentLengthMm of lengthValues) for (const segmentCount of segmentValues) {
-    if (config.searchOrder === "target-mass" && (outerDiameterMm <= coreDiameterMm || outerDiameterMm > config.chamberDiameterMm || segmentLengthMm * segmentCount > config.chamberLengthMm)) {
+    if (config.mode !== "excel" && config.searchOrder === "target-mass" && (outerDiameterMm <= coreDiameterMm || outerDiameterMm > config.chamberDiameterMm || segmentLengthMm * segmentCount > config.chamberLengthMm)) {
       prevalidationRejectedCount += 1;
       continue;
     }
@@ -222,7 +224,10 @@ function prepareSearch(config: CandidateSearchConfig): PreparedSearch {
     }
     geometries.push({ outerDiameterMm, coreDiameterMm, segmentLengthMm, segmentCount, approximateMassKg });
   }
-  if (config.searchOrder === "target-mass") geometries.sort((left, right) => Math.abs(left.approximateMassKg - config.targetFuelMassKg) - Math.abs(right.approximateMassKg - config.targetFuelMassKg));
+  if (config.searchOrder === "target-mass") geometries.sort((left, right) =>
+    Math.abs(left.approximateMassKg - config.targetFuelMassKg) - Math.abs(right.approximateMassKg - config.targetFuelMassKg)
+    || left.outerDiameterMm - right.outerDiameterMm || left.coreDiameterMm - right.coreDiameterMm
+    || left.segmentLengthMm - right.segmentLengthMm || left.segmentCount - right.segmentCount);
   const maxCandidateCount = config.maxCandidateCount ?? DEFAULT_MAX_CANDIDATES;
   const precisionGeometries = geometries.slice(0, maxCandidateCount);
   return {
@@ -304,10 +309,10 @@ function finishSearch(config: CandidateSearchConfig, prepared: PreparedSearch, c
     excludedByLimit: prepared.geometries.length - prepared.precisionGeometries.length,
     maxCandidateCount: config.maxCandidateCount ?? DEFAULT_MAX_CANDIDATES,
     limited: prepared.truncated,
-    selectionOrder: "range",
+    selectionOrder: "target-mass",
     scope: prepared.truncated ? "evaluated-subset" : "all-preprocessed-candidates",
     note: prepared.truncated
-      ? "전처리 후 범위 나열 순서(Do → do → Lo → 세그먼트)의 앞부분만 평가했습니다. 대표·참고 후보와 판정 집계는 평가한 일부 후보 기준이며, 입력 범위 전체의 최상위 후보나 후보 부재를 뜻하지 않습니다. 상한을 늘린 뒤 재계산할 수 있습니다."
+      ? "전체 전처리 대상에서 목표 질량 절대 오차가 작은 순서로 일부만 평가했습니다. 동률은 Do → do → Lo → 세그먼트 오름차순입니다. 대표·참고 후보와 판정 집계는 평가한 일부 후보 기준이며, 입력 범위 전체의 최상위 후보나 후보 부재를 뜻하지 않습니다. 상한을 늘린 뒤 재계산할 수 있습니다."
       : "전처리 후 정밀 계산 대상을 모두 평가했습니다. 형상 검증 탈락과 계산 실패도 평가 시도 수에 포함됩니다. 전역 최적해나 안전 판정은 아닙니다.",
   } : undefined;
   candidates.sort((left, right) => compareCandidatePriority(left, right, config));
@@ -341,7 +346,7 @@ function finishSearch(config: CandidateSearchConfig, prepared: PreparedSearch, c
         : !hasThrustMatch ? "후보는 있지만 평균 추력 불일치"
         : "입력한 질량과 추력 조합을 동시에 만족하는 후보 없음";
   const rangeSummary = `범위 챔버 ${config.chamberDiameterMm}×${config.chamberLengthMm} mm, Do ${config.outerDiameterMm.min}~${config.outerDiameterMm.max}, do ${config.coreDiameterMm.min}~${config.coreDiameterMm.max}, Lo ${config.segmentLengthMm.min}~${config.segmentLengthMm.max}, 세그먼트 ${config.segmentCount.min}~${config.segmentCount.max}`;
-  const automaticSummary = config.searchOrder === "target-mass"
+  const automaticSummary = config.mode !== "excel" && config.searchOrder === "target-mass"
     ? `${rangeSummary}. 자동 탐색 확장 ${config.automaticExpansionStage ?? 0}단계. 전체 후보 ${prepared.totalCombinations.toLocaleString()}개, 정밀 계산 전 형상 제외 ${prepared.prevalidationRejectedCount.toLocaleString()}개, 질량 상한 제외 ${prepared.massFilteredCount.toLocaleString()}개, 질량 계산 ${prepared.geometries.length.toLocaleString()}개, 정밀 계산 ${counters.evaluatedCombinations.toLocaleString()}개, 정밀 검증 탈락 ${counters.precisionValidationRejectedCount.toLocaleString()}개, 목표 질량 근처 후보 ${prepared.targetMassNearbyIncluded ? "포함" : "누락"}. 가장 가까운 질량 ${closestMassCandidate?.grainMassKg.toFixed(4) ?? "없음"} kg, 가장 가까운 추력 ${config.targetThrustEnabled === false ? "미입력" : `${closestThrustCandidate?.averageThrustN.toFixed(2) ?? "없음"} N`}. 중단 사유: ${automaticDiagnosis}.`
     : undefined;
   const partialWarning = "전체 조합 중 목표 질량 근처 일부 후보만 정밀 계산한 근사 추천이며, 전체 탐색 공간의 전역 최적해를 보장하지 않습니다.";
@@ -359,7 +364,7 @@ function finishSearch(config: CandidateSearchConfig, prepared: PreparedSearch, c
     prefilteredCandidateCount: prepared.geometries.length,
     targetMassNearbyIncluded: prepared.targetMassNearbyIncluded,
     truncated: prepared.truncated,
-    warning: config.searchOrder === "target-mass" ? `${partialWarning} ${automaticSummary}` : (prepared.truncated ? `후보 조합 ${prepared.totalCombinations.toLocaleString()}개 중 ${counters.evaluatedCombinations.toLocaleString()}개만 계산했으며 전역 최적해를 보장하지 않습니다.${precisionEvaluation ? ` ${precisionEvaluation.note}` : ""}` : automaticSummary),
+    warning: config.mode !== "excel" && config.searchOrder === "target-mass" ? `${partialWarning} ${automaticSummary}` : (prepared.truncated ? `후보 조합 ${prepared.totalCombinations.toLocaleString()}개 중 ${counters.evaluatedCombinations.toLocaleString()}개만 계산했으며 전역 최적해를 보장하지 않습니다.${precisionEvaluation ? ` ${precisionEvaluation.note}` : ""}` : automaticSummary),
     diagnosis: precisionEvaluation?.limited ? "일부 후보만 평가했습니다. 미평가 후보가 있어 입력 범위 전체의 후보 유무를 판단할 수 없습니다." : automaticDiagnosis,
     automaticExpansionStage: config.automaticExpansionStage,
     searchEnvelope: { chamberDiameterMm: config.chamberDiameterMm, chamberLengthMm: config.chamberLengthMm, outerDiameterMm: config.outerDiameterMm, coreDiameterMm: config.coreDiameterMm, segmentLengthMm: config.segmentLengthMm, segmentCount: config.segmentCount },

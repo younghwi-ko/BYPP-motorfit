@@ -45,7 +45,7 @@ test("Excel 소수 범위 24개 · 저장·복원·CSV/JSON·인쇄의 실제 �
   expect(payload.search.evaluatedCombinations).toBe(24);
   expect(payload.search.truncated).toBe(false);
   expect(payload.search.automaticExpansionStage).toBe(0);
-  expect(payload.metadata.engineVersion).toBe("candidate-search-2");
+  expect(payload.metadata.engineVersion).toBe("candidate-search-3");
   expect(payload.input.mode).toBe("excel");
   expect(payload.input.targetThrustEnabled).toBe(false);
   expect(payload.input.targetThrustText).toBe("");
@@ -154,7 +154,7 @@ test("Excel Worker 진행률·취소 후 동일 범위 재계산과 제한 표�
 });
 
 for (const mobile of [false, true]) {
-  test(`Excel 상한 1→10 · 나중 후보 평가·저장 metadata · ${mobile ? "390px" : "데스크톱"}`, async ({ page }) => {
+  test(`Excel 상한 1→10 · 질량 근접 후보 우선 평가·저장 metadata · ${mobile ? "390px" : "데스크톱"}`, async ({ page }) => {
     if (mobile) await page.setViewportSize({ width: 390, height: 844 });
     await page.context().addInitScript(() => { window.print = () => document.documentElement.setAttribute("data-print-called", "true"); });
     await setupExcel(page);
@@ -166,16 +166,16 @@ for (const mobile of [false, true]) {
     await limit.fill("1");
     await calculate(page);
     const low = JSON.parse((await download(page, "JSON 내보내기")).text);
-    const expected = { totalCombinations: 6, eligibleCandidates: 3, attemptedCandidates: 1, excludedByLimit: 2, maxCandidateCount: 1, limited: true, selectionOrder: "range", scope: "evaluated-subset" };
+    const expected = { totalCombinations: 6, eligibleCandidates: 3, attemptedCandidates: 1, excludedByLimit: 2, maxCandidateCount: 1, limited: true, selectionOrder: "target-mass", scope: "evaluated-subset" };
     expect(low.search.precisionEvaluation).toMatchObject(expected);
     expect(low.metadata.precisionEvaluation).toEqual(low.search.precisionEvaluation);
     expect(low.input.maxCandidateCount).toBe(1);
-    expect(low.candidates.map((item: { geometry: string }) => item.geometry)).toEqual(["45×15×78/2"]);
+    expect(low.candidates.map((item: { geometry: string }) => item.geometry)).toEqual(["45×15×80/2"]);
     const panel = page.getByTestId("excel-search-limit");
     for (const [label, value] of [["전체 조합 수", "6개"], ["전처리 후 정밀 계산 대상 후보 수", "3개"], ["실제 정밀 평가 시도 수", "1개"], ["상한 때문에 평가하지 못한 후보 수", "2개"]]) {
       await expect(panel.getByText(label, { exact: true }).locator("..")).toContainText(value);
     }
-    await expect(panel).toContainText("앞부분만 평가");
+    await expect(panel).toContainText("목표 질량 절대 오차");
     await expect(page.getByTestId("representative-candidate")).toContainText("평가한 일부 후보 중 대표");
     expect(low.search.diagnosis).toContain("미평가 후보");
     await limit.fill("10");
@@ -201,7 +201,7 @@ for (const mobile of [false, true]) {
     const report = await popupEvent;
     await expect(report.getByRole("heading", { name: "평가한 일부 후보 중 대표 후보 판정", exact: true })).toBeVisible();
     await expect(report.getByText("상한 때문에 평가하지 못한 후보 수", { exact: true }).locator("..")).toContainText("2");
-    await expect(report.getByText(/전처리 후 범위 나열 순서/)).toBeVisible();
+    await expect(report.getByText(/전체 전처리 대상에서 목표 질량/)).toBeVisible();
     await expect.poll(() => report.locator("html").getAttribute("data-print-called")).toBe("true");
     await report.close();
     await calculate(page);
